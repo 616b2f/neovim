@@ -435,6 +435,9 @@ local to_vim_value = {
   map = function(_, value)
     if type(value) == 'string' then
       return value
+    elseif vim.isarray(value) then
+      value = remove_duplicate_values(value)
+      return table.concat(value, ',')
     end
 
     local result = {}
@@ -692,7 +695,7 @@ local function create_option_accessor(scope)
   local option_mt
 
   local function make_option(name, value)
-    local info = assert(get_options_info(name), 'Not a valid option name: ' .. name)
+    local info = get_options_info(name) or error('Not a valid option name: ' .. name)
 
     if type(value) == 'table' and getmetatable(value) == option_mt then
       assert(name == value._name, "must be the same value, otherwise that's weird.")

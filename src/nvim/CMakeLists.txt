@@ -53,7 +53,7 @@ if(ENABLE_UNIBILIUM)
 endif()
 
 if(ENABLE_WASMTIME)
-  find_package(Wasmtime 29.0.1 EXACT REQUIRED)
+  find_package(Wasmtime 36.0.6 EXACT REQUIRED)
   target_link_libraries(main_lib INTERFACE wasmtime)
   target_compile_definitions(nvim_bin PRIVATE HAVE_WASMTIME)
 endif()
@@ -134,15 +134,18 @@ elseif(CMAKE_C_COMPILER_ID STREQUAL "GNU")
     $<$<CONFIG:Release>:-Wno-unused-result>
     $<$<CONFIG:RelWithDebInfo>:-Wno-unused-result>
     $<$<CONFIG:MinSizeRel>:-Wno-unused-result>)
+
+  target_link_options(nvim_bin PRIVATE -Wno-free-nonheap-object) # see #37250
 elseif(CMAKE_C_COMPILER_ID MATCHES "Clang")
   # On FreeBSD 64 math.h uses unguarded C11 extension, which taints clang
   # 3.4.1 used there.
-  if(CMAKE_SYSTEM_NAME STREQUAL "FreeBSD")
+  # on GNU/Linux, glibc 2.43 is tainted with c11 features when you use _GNU_SOURCE
+  if(CMAKE_SYSTEM_NAME STREQUAL "FreeBSD" OR CMAKE_SYSTEM_NAME STREQUAL "Linux")
     target_compile_options(main_lib INTERFACE -Wno-c11-extensions)
   endif()
 
   # workaround for clang-11 on macOS, supported on later versions
-  if(NOT APPLE)
+  if(NOT APPLE AND NOT CMAKE_CROSSCOMPILING)
     target_link_libraries(nvim_bin PRIVATE -Wl,--no-undefined)
   endif()
 endif()
@@ -153,7 +156,7 @@ if(UNIX)
   if (CMAKE_SYSTEM_NAME STREQUAL "Haiku")
     target_link_libraries(main_lib INTERFACE bsd)
     target_link_libraries(nvim_bin PRIVATE -lnetwork)
-  elseif (NOT CMAKE_SYSTEM_NAME STREQUAL "SunOS")
+  elseif (NOT CMAKE_SYSTEM_NAME STREQUAL "SunOS" AND NOT CMAKE_CROSSCOMPILING)
     target_link_libraries(main_lib INTERFACE util)
   endif()
 endif()
@@ -522,8 +525,13 @@ add_custom_command(
     "${NVIM_VERSION_DEF_H}"
   DEPENDS "${PROJECT_BINARY_DIR}/cmake.config/auto/versiondef-$<CONFIG>.h")
 
-set(LUA_GEN ${LUA_GEN_PRG} ${GENERATOR_PRELOAD} ${PROJECT_SOURCE_DIR} $<TARGET_FILE:nlua0> ${PROJECT_BINARY_DIR})
-set(LUA_GEN_DEPS ${GENERATOR_PRELOAD} $<TARGET_FILE:nlua0>)
+if(CMAKE_CROSSCOMPILING AND NLUA0_HOST_PRG)
+  set(LUA_GEN ${LUA_GEN_PRG} ${GENERATOR_PRELOAD} ${PROJECT_SOURCE_DIR} ${NLUA0_HOST_PRG} ${PROJECT_BINARY_DIR})
+  set(LUA_GEN_DEPS ${GENERATOR_PRELOAD} ${NLUA0_HOST_PRG})
+else()
+  set(LUA_GEN ${LUA_GEN_PRG} ${GENERATOR_PRELOAD} ${PROJECT_SOURCE_DIR} $<TARGET_FILE:nlua0> ${PROJECT_BINARY_DIR})
+  set(LUA_GEN_DEPS ${GENERATOR_PRELOAD} $<TARGET_FILE:nlua0>)
+endif()
 
 # Like LUA_GEN but includes also vim.fn, vim.api, vim.uv, etc
 set(NVIM_LUA $<TARGET_FILE:nvim_bin> -u NONE -l ${NVIM_LUA_PRELOAD} ${PROJECT_SOURCE_DIR})

@@ -1041,9 +1041,12 @@ void ml_recover(bool checkext)
             // This is slow, but it works.
             if (!cannot_open) {
               line_count = pp->pb_pointer[idx].pe_line_count;
-              if (readfile(curbuf->b_ffname, NULL, lnum,
-                           pp->pb_pointer[idx].pe_old_lnum - 1, line_count,
-                           NULL, 0, false) != OK) {
+              linenr_T pe_old_lnum = pp->pb_pointer[idx].pe_old_lnum;
+              // Validate pe_line_count and pe_old_lnum from the
+              // untrusted swap file before passing to readfile().
+              if (line_count <= 0 || pe_old_lnum < 1
+                  || readfile(curbuf->b_ffname, NULL, lnum, pe_old_lnum - 1,
+                              line_count, NULL, 0, false) != OK) {
                 cannot_open = true;
               } else {
                 lnum += line_count;
@@ -1066,6 +1069,23 @@ void ml_recover(bool checkext)
           bnum = pp->pb_pointer[idx].pe_bnum;
           line_count = pp->pb_pointer[idx].pe_line_count;
           page_count = (unsigned)pp->pb_pointer[idx].pe_page_count;
+          // Validate pe_bnum and pe_page_count from the untrusted
+          // swap file before passing to mf_get(), which uses
+          // page_count to calculate allocation size.  A bogus value
+          // (e.g. 0x40000000) would cause a multi-GB allocation.
+          // pe_page_count must be >= 1 and bnum + page_count must
+          // not exceed the number of pages in the swap file.
+          if (page_count < 1 || bnum + page_count > mfp->mf_blocknr_max + 1) {
+            error++;
+            ml_append(lnum++, _("???ILLEGAL BLOCK NUMBER"), (colnr_T)0, true);
+            // Skip this entry and pop back up the stack to keep
+            // recovering whatever else we can.
+            idx = ip->ip_index + 1;
+            bnum = ip->ip_bnum;
+            page_count = 1;
+            buf->b_ml.ml_stack_top--;
+            continue;
+          }
           idx = 0;
           continue;
         }
@@ -1285,42 +1305,42 @@ int recover_names(char *fname, bool do_list, list_T *ret_list, int nr, char **fn
 
   // Do the loop for every directory in 'directory'.
   // First allocate some memory to put the directory name in.
-  char *dir_name = xmalloc(strlen(p_dir) + 1);
+  String dir_name;
+  dir_name.data = xmalloc(strlen(p_dir) + 1);
   char *dirp = p_dir;
   while (*dirp) {
     // Isolate a directory name from *dirp and put it in dir_name (we know
     // it is large enough, so use 31000 for length).
     // Advance dirp to next directory name.
-    copy_option_part(&dirp, dir_name, 31000, ",");
+    dir_name.size = copy_option_part(&dirp, dir_name.data, 31000, ",");
 
-    if (dir_name[0] == '.' && dir_name[1] == NUL) {     // check current dir
+    if (dir_name.data[0] == '.' && dir_name.data[1] == NUL) {     // check current dir
       if (fname == NULL) {
-        names[0] = xstrdup("*.sw?");
+        names[0] = xmemdupz(S_LEN("*.sw?"));
         // For Unix names starting with a dot are special.  MS-Windows
         // supports this too, on some file systems.
-        names[1] = xstrdup(".*.sw?");
-        names[2] = xstrdup(".sw?");
+        names[1] = xmemdupz(S_LEN(".*.sw?"));
+        names[2] = xmemdupz(S_LEN(".sw?"));
         num_names = 3;
       } else {
         num_names = recov_file_names(names, fname_res, true);
       }
     } else {                      // check directory dir_name
       if (fname == NULL) {
-        names[0] = concat_fnames(dir_name, "*.sw?", true);
+        names[0] = concat_fnames(dir_name.data, "*.sw?", true);
         // For Unix names starting with a dot are special.  MS-Windows
         // supports this too, on some file systems.
-        names[1] = concat_fnames(dir_name, ".*.sw?", true);
-        names[2] = concat_fnames(dir_name, ".sw?", true);
+        names[1] = concat_fnames(dir_name.data, ".*.sw?", true);
+        names[2] = concat_fnames(dir_name.data, ".sw?", true);
         num_names = 3;
       } else {
-        int len = (int)strlen(dir_name);
-        p = dir_name + len;
-        if (after_pathsep(dir_name, p) && len > 1 && p[-1] == p[-2]) {
+        p = dir_name.data + dir_name.size;
+        if (after_pathsep(dir_name.data, p) && dir_name.size > 1 && p[-1] == p[-2]) {
           // Ends with '//', Use Full path for swap name
-          tail = make_percent_swname(dir_name, p, fname_res);
+          tail = make_percent_swname(dir_name.data, p, fname_res);
         } else {
           tail = path_tail(fname_res);
-          tail = concat_fnames(dir_name, tail, true);
+          tail = concat_fnames(dir_name.data, tail, true);
         }
         num_names = recov_file_names(names, tail, false);
         xfree(tail);
@@ -1381,7 +1401,7 @@ int recover_names(char *fname, bool do_list, list_T *ret_list, int nr, char **fn
         dirp = "";                        // stop searching
       }
     } else if (do_list) {
-      if (dir_name[0] == '.' && dir_name[1] == NUL) {
+      if (dir_name.data[0] == '.' && dir_name.data[1] == NUL) {
         if (fname == NULL) {
           msg_puts(_("   In current directory:\n"));
         } else {
@@ -1389,7 +1409,7 @@ int recover_names(char *fname, bool do_list, list_T *ret_list, int nr, char **fn
         }
       } else {
         msg_puts(_("   In directory "));
-        msg_home_replace(dir_name);
+        msg_home_replace(dir_name.data);
         msg_puts(":\n");
       }
 
@@ -1413,7 +1433,7 @@ int recover_names(char *fname, bool do_list, list_T *ret_list, int nr, char **fn
       ui_flush();
     } else if (ret_list != NULL) {
       for (int i = 0; i < num_files; i++) {
-        char *name = concat_fnames(dir_name, files[i], true);
+        char *name = concat_fnames(dir_name.data, files[i], true);
         tv_list_append_allocated_string(ret_list, name);
       }
     } else {
@@ -1427,7 +1447,7 @@ int recover_names(char *fname, bool do_list, list_T *ret_list, int nr, char **fn
       FreeWild(num_files, files);
     }
   }
-  xfree(dir_name);
+  xfree(dir_name.data);
   return file_count;
 }
 
@@ -2000,10 +2020,10 @@ static int ml_append_int(buf_T *buf, linenr_T lnum, char *line_arg, colnr_T len_
   if (len == 0) {
     len = (colnr_T)strlen(line) + 1;            // space needed for the text
   }
-  int space_needed = len + (int)INDEX_SIZE;     // space needed for text + index
+  int64_t space_needed = len + (int64_t)INDEX_SIZE;  // space needed for text + index
 
   memfile_T *mfp = buf->b_ml.ml_mfp;
-  int page_size = (int)mfp->mf_page_size;
+  int64_t page_size = mfp->mf_page_size;
 
   // find the data block containing the previous line
   // This also fills the stack with the blocks from the root to the data block
@@ -2033,7 +2053,7 @@ static int ml_append_int(buf_T *buf, linenr_T lnum, char *line_arg, colnr_T len_
   // - appending to the last line in the block
   // - not appending to the last line in the file
   // insert in front of the next block.
-  if ((int)dp->db_free < space_needed && db_idx == line_count - 1
+  if ((int64_t)dp->db_free < space_needed && db_idx == line_count - 1
       && lnum < buf->b_ml.ml_line_count) {
     // Now that the line is not going to be inserted in the block that we
     // expected, the line count has to be adjusted in the pointer blocks
@@ -2057,7 +2077,7 @@ static int ml_append_int(buf_T *buf, linenr_T lnum, char *line_arg, colnr_T len_
   }
   buf->b_ml.ml_line_count++;
 
-  if ((int)dp->db_free >= space_needed) {       // enough room in data block
+  if ((int64_t)dp->db_free >= space_needed) {  // enough room in data block
     // Insert the new line in an existing data block, or in the data block
     // allocated above.
     dp->db_txt_start -= (unsigned)len;
@@ -2135,7 +2155,7 @@ static int ml_append_int(buf_T *buf, linenr_T lnum, char *line_arg, colnr_T len_
         data_moved = (int)(((dp->db_index[db_idx]) & DB_INDEX_MASK) -
                            dp->db_txt_start);
         total_moved = data_moved + lines_moved * (int)INDEX_SIZE;
-        if ((int)dp->db_free + total_moved >= space_needed) {
+        if ((int64_t)dp->db_free + total_moved >= space_needed) {
           in_left = true;               // put new line in left block
           space_needed = total_moved;
         } else {
@@ -2145,7 +2165,7 @@ static int ml_append_int(buf_T *buf, linenr_T lnum, char *line_arg, colnr_T len_
       }
     }
 
-    int page_count = ((space_needed + (int)HEADER_SIZE) + page_size - 1) / page_size;
+    int64_t page_count = ((space_needed + (int64_t)HEADER_SIZE) + page_size - 1) / page_size;
     hp_new = ml_new_data(mfp, flags & ML_APPEND_NEW, page_count);
     if (db_idx < 0) {           // left block is new
       hp_left = hp_new;
@@ -3140,7 +3160,7 @@ static void ml_flush_line(buf_T *buf, bool noalloc)
 }
 
 /// create a new, empty, data block
-static bhdr_T *ml_new_data(memfile_T *mfp, bool negative, int page_count)
+static bhdr_T *ml_new_data(memfile_T *mfp, bool negative, int64_t page_count)
 {
   assert(page_count >= 0);
   bhdr_T *hp = mf_new(mfp, negative, (unsigned)page_count);

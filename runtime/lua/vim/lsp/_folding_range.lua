@@ -133,7 +133,7 @@ function State:multi_handler(results, ctx)
 
   for client_id, result in pairs(results) do
     if result.err then
-      log.error(result.err)
+      log.error('folding_range', result.err)
     else
       self.client_state[client_id] = result.result
     end
@@ -231,14 +231,11 @@ function State:new(bufnr)
   api.nvim_create_autocmd('LspNotify', {
     group = self.augroup,
     buffer = bufnr,
-    callback = function(args)
-      local client = assert(vim.lsp.get_client_by_id(args.data.client_id))
+    callback = function(ev)
+      local client = assert(vim.lsp.get_client_by_id(ev.data.client_id))
       if
         client:supports_method('textDocument/foldingRange', bufnr)
-        and (
-          args.data.method == 'textDocument/didChange'
-          or args.data.method == 'textDocument/didOpen'
-        )
+        and (ev.data.method == 'textDocument/didChange' or ev.data.method == 'textDocument/didOpen')
       then
         self:refresh(client)
       end

@@ -23,6 +23,16 @@ local function check_runtime()
     ['lua/provider/perl/health.lua'] = false,
     ['lua/provider/python/health.lua'] = false,
     ['lua/provider/ruby/health.lua'] = false,
+    ['lua/vim/_defaults.lua'] = false,
+    ['lua/vim/_editor.lua'] = false,
+    ['lua/vim/_extui.lua'] = false,
+    ['lua/vim/_extui/cmdline.lua'] = false,
+    ['lua/vim/_extui/messages.lua'] = false,
+    ['lua/vim/_extui/shared.lua'] = false,
+    ['lua/vim/_options.lua'] = false,
+    ['lua/vim/_stringbuffer.lua'] = false,
+    ['lua/vim/_system.lua'] = false,
+    ['lua/vim/shared.lua'] = false,
     ['plugin/health.vim'] = false,
     ['plugin/man.vim'] = false,
     ['queries/help/highlights.scm'] = false,
@@ -285,10 +295,15 @@ local function check_tmux()
   if tmux_esc_time ~= 'error' then
     if tmux_esc_time == '' then
       health.error('`escape-time` is not set', suggestions)
-    elseif tonumber(tmux_esc_time) > 300 then
-      health.error('`escape-time` (' .. tmux_esc_time .. ') is higher than 300ms', suggestions)
     else
-      health.ok('escape-time: ' .. tmux_esc_time)
+      local tmux_esc_time_ms = vim._tointeger(tmux_esc_time)
+      if not tmux_esc_time_ms then
+        health.error('`escape-time` (' .. tmux_esc_time .. ') is not an integer', suggestions)
+      elseif tmux_esc_time_ms > 300 then
+        health.error('`escape-time` (' .. tmux_esc_time .. ') is higher than 300ms', suggestions)
+      else
+        health.ok('escape-time: ' .. tmux_esc_time)
+      end
     end
   end
 
@@ -563,20 +578,37 @@ end
 local function check_head_hash(commit)
   local result = vim
     .system(
-      { 'git', 'ls-remote', 'https://github.com/neovim/neovim', 'HEAD' },
+      { 'git', 'ls-remote', 'https://github.com/neovim/neovim', 'HEAD', 'refs/tags/nightly' },
       { text = true, timeout = 5000 }
     )
     :wait()
   if result.code ~= 0 or not result.stdout or result.stdout == '' then
     return
   end
-  local upstream = assert(result.stdout:match('^(%x+)'))
-  if not vim.startswith(upstream, commit) then
-    vim.health.warn(
-      ('Build is outdated. Local: %s, Latest: %s'):format(commit, upstream:sub(1, 12))
-    )
+
+  local refs = {} ---@type table<string, string>
+  for line in result.stdout:gmatch('[^\n]+') do
+    local sha, ref = line:match('^(%x+)%s+(%S+)$')
+    if sha and ref then
+      refs[ref] = sha
+    end
+  end
+
+  local head_sha = assert(refs['HEAD'])
+  local nightly_sha = refs['refs/tags/nightly']
+
+  if vim.startswith(head_sha, commit) then
+    vim.health.ok('Up to date (HEAD)')
+  elseif nightly_sha and vim.startswith(nightly_sha, commit) then
+    vim.health.ok('Up to date (nightly)')
   else
-    vim.health.ok(('Using latest HEAD: %s'):format(upstream:sub(1, 12)))
+    vim.health.warn(
+      ('Build is outdated. Local: %s, HEAD: %s%s'):format(
+        commit,
+        head_sha:sub(1, 12),
+        nightly_sha and (', Nightly: ' .. nightly_sha:sub(1, 12)) or ''
+      )
+    )
   end
 end
 
@@ -643,8 +675,8 @@ local function check_sysinfo()
   vim.api.nvim_create_autocmd('FileType', {
     pattern = 'checkhealth',
     once = true,
-    callback = function(args)
-      local buf = args.buf
+    callback = function(ev)
+      local buf = ev.buf
       local win = vim.fn.bufwinid(buf)
       if win == -1 then
         return

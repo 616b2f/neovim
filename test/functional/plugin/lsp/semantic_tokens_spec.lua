@@ -307,15 +307,12 @@ describe('semantic token highlighting', function()
         return vim.lsp.start({ name = 'dummy', cmd = _G.server_full.cmd })
       end)
 
+      -- ensure initial semantic token requests have been sent before feeding input
+      n.poke_eventloop()
       -- modify the buffer
       feed('o<ESC>')
 
-      local messages = exec_lua(function()
-        vim.wait(1000, function()
-          return #_G.server_full.messages >= 4
-        end)
-        return _G.server_full.messages
-      end)
+      local messages = exec_lua('return _G.server_full.messages')
       local called_full = 0
       local called_range = 0
       for _, m in ipairs(messages) do
@@ -504,10 +501,10 @@ describe('semantic token highlighting', function()
       insert(text)
       exec_lua(function()
         vim.api.nvim_create_autocmd('LspTokenUpdate', {
-          callback = function(args)
-            local token = args.data.token --- @type STTokenRange
+          callback = function(ev)
+            local token = ev.data.token --- @type STTokenRange
             if token.type == 'function' and token.modifiers.declaration then
-              vim.lsp.semantic_tokens.highlight_token(token, args.buf, args.data.client_id, 'Macro')
+              vim.lsp.semantic_tokens.highlight_token(token, ev.buf, ev.data.client_id, 'Macro')
             end
           end,
         })

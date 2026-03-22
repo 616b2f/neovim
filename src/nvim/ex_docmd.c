@@ -1591,11 +1591,13 @@ bool parse_cmdline(char **cmdline, exarg_T *eap, CmdParseInfo *cmdinfo, const ch
     .cookie = NULL,
   };
 
-  // Parse command modifiers
-  if (parse_command_modifiers(eap, errormsg, &cmdinfo->cmdmod, false) == FAIL) {
+  char *orig_cmd = eap->cmd;
+  // If parse command modifiers failed but modifiers were passed, continue
+  int result = parse_command_modifiers(eap, errormsg, &cmdinfo->cmdmod, false);
+  after_modifier = eap->cmd;
+  if (result == FAIL && after_modifier == orig_cmd) {
     goto end;
   }
-  after_modifier = eap->cmd;
 
   // We need the command name to know what kind of range it uses.
   char *p = find_excmd_after_range(eap);
@@ -1612,10 +1614,28 @@ bool parse_cmdline(char **cmdline, exarg_T *eap, CmdParseInfo *cmdinfo, const ch
 
   // Skip colon and whitespace
   eap->cmd = skip_colon_white(eap->cmd, true);
-  // Fail if command is a comment or if command doesn't exist
-  if (*eap->cmd == NUL || *eap->cmd == '"') {
+  // Fail if command is a comment
+  if (*eap->cmd == '"') {
     goto end;
   }
+  // Fail only if: empty command AND no range AND no modifier
+  if (*eap->cmd == NUL && eap->addr_count == 0 && after_modifier == *cmdline) {
+    goto end;
+  }
+
+  // Allow range-only (:1) or modifier-only (:aboveleft) commands.
+  if (*eap->cmd == NUL && eap->cmdidx == CMD_SIZE) {
+    eap->arg = eap->cmd;
+    if (eap->addr_count > 0) {
+      eap->argt = EX_RANGE;
+    } else {
+      eap->argt = 0;
+      eap->addr_type = ADDR_NONE;
+    }
+    retval = true;
+    goto end;
+  }
+
   // Fail if command is invalid
   if (eap->cmdidx == CMD_SIZE) {
     xstrlcpy(IObuff, _(e_not_an_editor_command), IOSIZE);
@@ -1861,6 +1881,10 @@ int execute_cmd(exarg_T *eap, CmdParseInfo *cmdinfo, bool preview)
   }
 
   correct_range(eap);
+  if (eap->cmdidx == CMD_SIZE && eap->addr_count > 0) {
+    errormsg = ex_range_without_command(eap);
+    goto end;
+  }
 
   if (((eap->argt & EX_WHOLEFOLD) || eap->addr_count >= 2) && !global_busy
       && eap->addr_type == ADDR_POSITIONS) {
@@ -2382,12 +2406,7 @@ static char *do_one_cmd(exarg_T *eap, int flags)
     // Also do this for ":read !cmd", ":write !cmd" and ":global".
     // Any others?
     for (char *s = ea.arg; *s; s++) {
-      // Remove one backslash before a newline, so that it's possible to
-      // pass a newline to the shell and also a newline that is preceded
-      // with a backslash.  This makes it impossible to end a shell
-      // command in a backslash, but that doesn't appear useful.
-      // Halving the number of backslashes is incompatible with previous
-      // versions.
+      // Remove one backslash before a newline.
       if (*s == '\\' && s[1] == '\n') {
         STRMOVE(s, s + 1);
       } else if (*s == '\n') {
@@ -2563,9 +2582,13 @@ int parse_command_modifiers(exarg_T *eap, const char **errormsg, cmdmod_T *cmod,
     // typing ":cmdmod cmd" in Visual mode works without having to move the
     // range to after the modifiers. The command will be "'<,'>cmdmod cmd",
     // parse "cmdmod cmd" and then put back "'<,'>" before "cmd" below.
-    eap->cmd += 5;
-    cmd_start = eap->cmd;
-    has_visual_range = true;
+    // Only skip '<,'>' if there's a command after it
+    const char *p = skipwhite(eap->cmd + 5);
+    if (*p != NUL && *p != '|') {
+      eap->cmd += 5;
+      cmd_start = eap->cmd;
+      has_visual_range = true;
+    }
   }
 
   // Repeat until no more command modifiers are found.
@@ -5147,6 +5170,12 @@ static void ex_restart(exarg_T *eap)
       continue;  // Drop --embed/--headless: the client decides how to start+attach the server.
     } else if (strequal(arg, "-")) {
       continue;  // Drop stdin ("-") argument.
+    } else if (strequal(arg, "-s")) {
+      // Drop "-s <scriptfile>": skip the scriptfile arg too.
+      if (li->li_next != NULL) {
+        li = li->li_next;
+      }
+      continue;
     } else if (strequal(arg, "+:::")) {
       // The special placeholder "+:::" marks a previous :restart command.
       // Drop the `"+:::", "-c", "…"` triplet, to avoid "stacking" commands from previous :restart(s).
@@ -5655,6 +5684,7 @@ int expand_findfunc(char *pat, char ***files, int *numMatches)
 
   int len = tv_list_len(l);
   if (len == 0) {  // empty List
+    tv_list_free(l);
     return FAIL;
   }
 
@@ -5809,7 +5839,7 @@ void ex_splitview(exarg_T *eap)
   // Either open new tab page or split the window.
   if (use_tab) {
     if (win_new_tabpage(cmdmod.cmod_tab != 0 ? cmdmod.cmod_tab : eap->addr_count == 0
-                        ? 0 : (int)eap->line2 + 1, eap->arg) != FAIL) {
+                        ? 0 : (int)eap->line2 + 1, eap->arg, true, NULL)) {
       do_exedit(eap, old_curwin);
       apply_autocmds(EVENT_TABNEWENTERED, NULL, NULL, false, curbuf);
 
@@ -7760,7 +7790,7 @@ char *eval_vars(char *src, const char *srcstart, size_t *usedlen, linenr_T *lnum
                                         ? (FIND_IDENT | FIND_STRING)
                                         : (spec_idx == SPEC_CEXPR
                                            ? (FIND_IDENT | FIND_STRING | FIND_EVAL)
-                                           : FIND_STRING));
+                                           : FIND_STRING), NULL);
     if (resultlen == 0) {
       *errormsg = "";
       return NULL;

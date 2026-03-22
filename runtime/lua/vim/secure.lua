@@ -162,13 +162,13 @@ end
 --- @class vim.trust.opts
 --- @inlinedoc
 ---
---- - `'allow'` to add a file to the trust database and trust it,
---- - `'deny'` to add a file to the trust database and deny it,
---- - `'remove'` to remove file from the trust database
+--- One of:
+---   - `'allow'` to add a file to the trust database and trust it,
+---   - `'deny'` to add a file to the trust database and deny it,
+---   - `'remove'` to remove file from the trust database
 --- @field action 'allow'|'deny'|'remove'
 ---
 --- Path to a file to update. Mutually exclusive with {bufnr}.
---- Cannot be used when {action} is "allow".
 --- @field path? string
 --- Buffer number to update. Mutually exclusive with {path}.
 --- @field bufnr? integer
@@ -194,10 +194,6 @@ function M.trust(opts)
   local action = opts.action
 
   assert(not path or not bufnr, '"path" and "bufnr" are mutually exclusive')
-
-  if action == 'allow' then
-    assert(not path, '"path" is not valid when action is "allow"')
-  end
 
   local fullpath ---@type string?
   if path then

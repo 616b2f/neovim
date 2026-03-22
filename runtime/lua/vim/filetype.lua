@@ -92,14 +92,15 @@ end
 ---
 ---@param bufnr integer The buffer to get the line from
 ---@param start_lnum integer The line number of the first line to start from (inclusive, 1-based)
----@return string|nil The first non-blank line if found or `nil` otherwise
+---@return string|nil line The first non-blank line if found or `nil` otherwise
+---@return integer|nil lnum The line number of the first non-blank line or `nil`
 function M._nextnonblank(bufnr, start_lnum)
-  for _, line in ipairs(M._getlines(bufnr, start_lnum, -1)) do
+  for off, line in ipairs(M._getlines(bufnr, start_lnum, -1)) do
     if not line:find('^%s*$') then
-      return line
+      return line, start_lnum + off - 1
     end
   end
-  return nil
+  return nil, nil
 end
 
 do
@@ -329,6 +330,7 @@ local extension = {
   cbl = 'cobol',
   atg = 'coco',
   recipe = 'conaryrecipe',
+  cto = 'concerto',
   ctags = 'conf',
   hook = function(_path, bufnr)
     return M._getline(bufnr, 1) == '[Trigger]' and 'confini' or nil
@@ -372,7 +374,6 @@ local extension = {
   cs = 'cs',
   csc = 'csc',
   csdl = 'csdl',
-  cshtml = 'html',
   fdr = 'csp',
   csp = 'csp',
   css = 'css',
@@ -447,6 +448,7 @@ local extension = {
   lc = 'elsa',
   elv = 'elvish',
   ent = detect.ent,
+  env = 'env',
   epp = 'epuppet',
   erl = 'erlang',
   hrl = 'erlang',
@@ -678,6 +680,7 @@ local extension = {
   bd = 'json',
   bda = 'json',
   xci = 'json',
+  cps = 'json',
   json5 = 'json5',
   jsonc = 'jsonc',
   jsonl = 'jsonl',
@@ -849,6 +852,7 @@ local extension = {
   NSP = 'natural',
   NSS = 'natural',
   ncf = 'ncf',
+  neon = 'neon',
   axs = 'netlinx',
   axi = 'netlinx',
   nginx = 'nginx',
@@ -1068,6 +1072,8 @@ local extension = {
   MODx = 'rapid',
   rasi = 'rasi',
   rasinc = 'rasi',
+  cshtml = 'razor',
+  razor = 'razor',
   rbs = 'rbs',
   rego = 'rego',
   rem = 'remind',
@@ -1150,7 +1156,6 @@ local extension = {
   cygport = detect.bash,
   ebuild = detect.bash,
   eclass = detect.bash,
-  env = detect.sh,
   envrc = detect.sh,
   ksh = detect.ksh,
   sh = detect.sh,
@@ -1432,6 +1437,8 @@ local extension = {
   kyml = 'yaml',
   grc = detect_line1('<%?xml', 'xml', 'yaml'),
   yang = 'yang',
+  yara = 'yara',
+  yar = 'yara',
   yuck = 'yuck',
   z8a = 'z8a',
   zig = 'zig',
@@ -1624,6 +1631,7 @@ local filename = {
   Earthfile = 'earthfile',
   ['.editorconfig'] = 'editorconfig',
   ['elinks.conf'] = 'elinks',
+  ['.env'] = 'env',
   ['rebar.config'] = 'erlang',
   ['mix.lock'] = 'elixir',
   ['filter-rules'] = 'elmfilt',
@@ -2054,6 +2062,7 @@ local pattern = {
     ['/etc/DIR_COLORS$'] = 'dircolors',
     ['/etc/dnsmasq%.conf$'] = 'dnsmasq',
     ['/etc/dnsmasq%.d/'] = starsetf('dnsmasq'),
+    ['/etc/wireguard/.*%.conf$'] = 'dosini',
     ['/etc/yum%.conf$'] = 'dosini',
     ['/etc/yum%.repos%.d/'] = starsetf('dosini'),
     ['/etc/gitconfig%.d/'] = starsetf('gitconfig'),
@@ -2649,11 +2658,13 @@ local pattern = {
     ['^%.cshrc'] = detect.csh,
     ['^%.login'] = detect.csh,
     ['^%.notmuch%-config%.'] = 'dosini',
+    ['^%.env%.'] = 'env',
     ['^%.gitsendemail%.msg%.......$'] = 'gitsendemail',
     ['^%.kshrc'] = detect.ksh,
     ['^%.article%.%d+$'] = 'mail',
     ['^%.letter%.%d+$'] = 'mail',
     ['^%.reminders'] = starsetf('remind'),
+    ['^%.envrc%.'] = detect.sh,
     ['^%.tcshrc'] = detect.tcsh,
     ['^%.zcompdump'] = starsetf('zsh'),
   },

@@ -143,21 +143,21 @@ describe('normal', function()
     fn.mkdir(locale_dir, 'p')
     fn.filecopy(build_dir .. '/src/nvim/po/tr.mo', locale_dir .. '/nvim.mo')
     finally(function()
-      n.rmdir(build_dir .. '/share')
+      n.rmdir(vim.fs.dirname(locale_dir))
     end)
 
     clear({ env = { LANG = 'tr_TR.UTF-8' } })
-    screen = Screen.new(75, 5)
+    screen = Screen.new(40, 5)
     exec('set ruler')
     exec('lang tr_TR.UTF-8')
     exec('put =range(1,40)')
     exec('5')
     screen:expect([[
-      3                                                                          |
-      ^4                                                                          |
-      5                                                                          |
-      6                                                                          |
-      40 more lines                                            5,1            %8 |
+      3                                       |
+      ^4                                       |
+      5                                       |
+      6                                       |
+      40 more lines         5,1            %8 |
     ]])
   end)
 end)

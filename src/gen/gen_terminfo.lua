@@ -53,10 +53,13 @@ local wanted_strings = {
   'cursor_up',
   'cursor_right',
   'delete_line',
+  'enter_blink_mode',
   'enter_bold_mode',
   'enter_ca_mode',
+  'enter_dim_mode',
   'enter_italics_mode',
   'enter_reverse_mode',
+  'enter_secure_mode',
   'enter_standout_mode',
   'enter_underline_mode',
   'erase_chars',
@@ -144,6 +147,7 @@ local function quote(str)
   return '"' .. str .. '"'
 end
 
+--- @type fun(...: any)
 local dbg = function() end
 -- dbg = print
 
@@ -196,7 +200,9 @@ for _, entry in ipairs(entries) do
   local boolpat = prepat .. ','
   local numpat = prepat .. '#([^,]+),'
   local strpat = prepat .. '=([^,]+),'
-  local bools, nums, strs = {}, {}, {}
+  local bools = {} --- @type table<string, true>
+  local nums = {} --- @type table<string, string>
+  local strs = {} --- @type table<string, string>
   for i, line in ipairs(lines) do
     local boolmatch = string.match(line, boolpat)
     local nummatch, numval = string.match(line, numpat)

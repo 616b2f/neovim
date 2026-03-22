@@ -194,6 +194,7 @@ func s:GetFilenameChecks() abort
     \ 'coco': ['file.atg'],
     \ 'codeowners': ['CODEOWNERS'],
     \ 'conaryrecipe': ['file.recipe'],
+    \ 'concerto': ['file.cto'],
     \ 'conf': ['auto.master', 'file.conf', 'texdoc.cnf', '.x11vncrc', '.chktexrc', '.ripgreprc', 'ripgreprc', 'file.ctags'],
     \ 'config': ['/etc/hostname.file', 'any/etc/hostname.file', 'configure.in', 'configure.ac', 'file.at', 'aclocal.m4'],
     \ 'confini': ['pacman.conf', 'paru.conf', 'mpv.conf', 'any/.aws/config', 'any/.aws/credentials', 'any/.aws/cli/alias', 'file.nmconnection',
@@ -256,6 +257,7 @@ func s:GetFilenameChecks() abort
     \            'psprint.conf', 'sofficerc', 'any/.config/lxqt/globalkeyshortcuts.conf', 'any/.config/screengrab/screengrab.conf',
     \            'any/.local/share/flatpak/repo/config',
     \            '.alsoftrc', 'alsoft.conf', 'alsoft.ini', 'alsoftrc.sample',
+    \            '/etc/wireguard/wg0.conf',
     \            '.notmuch-config', '.notmuch-config.myprofile',
     \            '~/.config/notmuch/myprofile/config'] + s:WhenConfigHome('$XDG_CONFIG_HOME/notmuch/myprofile/config'),
     \ 'dot': ['file.dot', 'file.gv'],
@@ -278,6 +280,7 @@ func s:GetFilenameChecks() abort
     \ 'elmfilt': ['filter-rules'],
     \ 'elsa': ['file.lc'],
     \ 'elvish': ['file.elv'],
+    \ 'env': ['.env', '.env.file', 'file.env'],
     \ 'epuppet': ['file.epp'],
     \ 'erlang': ['file.erl', 'file.hrl', 'file.yaws', 'file.app.src', 'rebar.config'],
     \ 'eruby': ['file.erb', 'file.rhtml'],
@@ -378,7 +381,7 @@ func s:GetFilenameChecks() abort
     \ 'hoon': ['file.hoon'],
     \ 'hostconf': ['/etc/host.conf', 'any/etc/host.conf'],
     \ 'hostsaccess': ['/etc/hosts.allow', '/etc/hosts.deny', 'any/etc/hosts.allow', 'any/etc/hosts.deny'],
-    \ 'html': ['file.html', 'file.htm', 'file.cshtml', 'file.component.html'],
+    \ 'html': ['file.html', 'file.htm', 'file.component.html'],
     \ 'htmlm4': ['file.html.m4'],
     \ 'httest': ['file.htt', 'file.htb'],
     \ 'http': ['file.http'],
@@ -416,7 +419,9 @@ func s:GetFilenameChecks() abort
     \ 'jovial': ['file.jov', 'file.j73', 'file.jovial'],
     \ 'jproperties': ['file.properties', 'file.properties_xx', 'file.properties_xx_xx', 'some.properties_xx_xx_file', 'org.eclipse.xyz.prefs'],
     \ 'jq': ['file.jq'],
-    \ 'json': ['file.json', 'file.jsonp', 'file.json-patch', 'file.geojson', 'file.webmanifest', 'Pipfile.lock', 'file.ipynb', 'file.jupyterlab-settings', '.prettierrc', '.firebaserc', '.stylelintrc', '.lintstagedrc', 'file.slnf', 'file.sublime-project', 'file.sublime-settings', 'file.sublime-workspace', 'file.bd', 'file.bda', 'file.xci', 'flake.lock', 'pack.mcmeta', 'deno.lock', '.swcrc', 'composer.lock', 'symfony.lock'],
+    \ 'json': ['file.json', 'file.jsonp', 'file.json-patch', 'file.geojson', 'file.webmanifest', 'Pipfile.lock', 'file.ipynb', 'file.jupyterlab-settings', 'file.cps',
+    \          '.prettierrc', '.firebaserc', '.stylelintrc', '.lintstagedrc', 'file.slnf', 'file.sublime-project', 'file.sublime-settings', 'file.sublime-workspace',
+    \          'file.bd', 'file.bda', 'file.xci', 'flake.lock', 'pack.mcmeta', 'deno.lock', '.swcrc', 'composer.lock', 'symfony.lock'],
     \ 'json5': ['file.json5'],
     \ 'jsonc': ['file.jsonc', '.babelrc', '.eslintrc', '.jsfmtrc', '.jshintrc', '.jscsrc', '.vsconfig', '.hintrc', '.swrc', 'jsconfig.json', 'tsconfig.json', 'tsconfig.test.json', 'tsconfig-test.json', '.luaurc', 'bun.lock', expand("$HOME/.config/VSCodium/User/settings.json"), '/home/user/.config/waybar/config'],
     \ 'jsonl': ['file.jsonl'],
@@ -576,6 +581,7 @@ func s:GetFilenameChecks() abort
     \ 'ncf': ['file.ncf'],
     \ 'neomuttlog': ['/home/user/.neomuttdebug1'],
     \ 'neomuttrc': ['Neomuttrc', '.neomuttrc', '.neomuttrc-file', '/.neomutt/neomuttrc', '/.neomutt/neomuttrc-file', 'Neomuttrc', 'Neomuttrc-file', 'any/.neomutt/neomuttrc', 'any/.neomutt/neomuttrc-file', 'neomuttrc', 'neomuttrc-file'],
+    \ 'neon': ['file.neon'],
     \ 'netlinx': ['file.axs', 'file.axi'],
     \ 'netrc': ['.netrc'],
     \ 'nginx': ['file.nginx', 'nginxfile.conf', 'filenginx.conf', 'any/etc/nginx/file', 'any/usr/local/nginx/conf/file', 'any/nginx/file.conf'],
@@ -677,6 +683,7 @@ func s:GetFilenameChecks() abort
     \ 'rapid': ['file.sysx', 'file.Sysx', 'file.SysX', 'file.SYSx', 'file.SYSX', 'file.modx', 'file.Modx', 'file.ModX', 'file.MODx', 'file.MODX'],
     \ 'rasi': ['file.rasi', 'file.rasinc'],
     \ 'ratpoison': ['.ratpoisonrc', 'ratpoisonrc'],
+    \ 'razor': ['file.cshtml', 'file.razor'],
     \ 'rbs': ['file.rbs'],
     \ 'rc': ['file.rc', 'file.rch'],
     \ 'rcs': ['file,v'],
@@ -731,7 +738,7 @@ func s:GetFilenameChecks() abort
     \ 'sh': ['.bashrc', '.bash_profile', '.bash-profile', '.bash_logout', '.bash-logout', '.bash_aliases', '.bash-aliases', '.bash_history', '.bash-history',
     \        '/tmp/bash-fc-3Ozjlw', '/tmp/bash-fc.3Ozjlw', 'PKGBUILD', 'file.bash', '/usr/share/doc/bash-completion/filter.sh',
     \        '/etc/udev/cdsymlinks.conf', 'any/etc/udev/cdsymlinks.conf', 'file.bats', '.ash_history', 'any/etc/neofetch/config.conf', '.xprofile',
-    \        'user-dirs.defaults', 'user-dirs.dirs', 'makepkg.conf', '.makepkg.conf', 'file.mdd', 'file.cygport', '.env', '.envrc', 'devscripts.conf',
+    \        'user-dirs.defaults', 'user-dirs.dirs', 'makepkg.conf', '.makepkg.conf', 'file.mdd', 'file.cygport', '.envrc', '.envrc.file', 'file.envrc', 'devscripts.conf',
     \        '.devscripts', 'file.lo', 'file.la', 'file.lai'],
     \ 'shaderslang': ['file.slang'],
     \ 'sieve': ['file.siv', 'file.sieve'],
@@ -983,6 +990,7 @@ func s:GetFilenameChecks() abort
     \ 'yaml': ['file.yaml', 'file.yml', 'file.eyaml', 'file.kyaml', 'file.kyml', 'any/.bundle/config', '.clangd', '.clang-format', '.clang-tidy', 'file.mplstyle', 'matplotlibrc', 'yarn.lock',
     \          '/home/user/.kube/config', '/home/user/.kube/kuberc', '.condarc', 'condarc', '.mambarc', 'mambarc', 'pixi.lock'],
     \ 'yang': ['file.yang'],
+    \ 'yara': ['file.yara', 'file.yar'],
     \ 'yuck': ['file.yuck'],
     \ 'z8a': ['file.z8a'],
     \ 'zathurarc': ['zathurarc'],
@@ -2543,6 +2551,39 @@ func Test_cls_file()
   call assert_equal('vb', &filetype)
   bwipe!
   unlet g:filetype_cls
+
+  let g:filetype_cls = 'objectscript'
+  split Xfile.cls
+  call assert_equal('objectscript', &filetype)
+  bwipe!
+  unlet g:filetype_cls
+
+  " ObjectScript
+
+  call writefile(['Class User.Person Extends (%Persistent, %Populate)'], 'Xfile.cls')
+  split Xfile.cls
+  call assert_equal('objectscript', &filetype)
+  bwipe!
+
+  call writefile(['Import MyApp.Utils', 'Class User.Person Extends %Persistent'], 'Xfile.cls')
+  split Xfile.cls
+  call assert_equal('objectscript', &filetype)
+  bwipe!
+
+  call writefile(['Include MyMacros', 'Class User.Person Extends %Persistent'], 'Xfile.cls')
+  split Xfile.cls
+  call assert_equal('objectscript', &filetype)
+  bwipe!
+
+  call writefile(['IncludeGenerator MyGen', 'Class User.Person Extends %Persistent'], 'Xfile.cls')
+  split Xfile.cls
+  call assert_equal('objectscript', &filetype)
+  bwipe!
+
+  call writefile(['Import MyApp.Utils', 'Include MyMacros', 'IncludeGenerator MyGen', 'Class User.Person Extends %Persistent'], 'Xfile.cls')
+  split Xfile.cls
+  call assert_equal('objectscript', &filetype)
+  bwipe!
 
   " TeX
 

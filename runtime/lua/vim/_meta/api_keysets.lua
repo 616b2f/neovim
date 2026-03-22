@@ -176,6 +176,7 @@ error('Cannot require a meta file')
 --- |'SafeState'
 --- |'SearchWrapped'
 --- |'SessionLoadPost'
+--- |'SessionLoadPre'
 --- |'SessionWritePost'
 --- |'ShellCmdPost'
 --- |'ShellFilterPost'
@@ -295,18 +296,22 @@ error('Cannot require a meta file')
 --- @field winid? integer
 
 --- @class vim.api.keyset.highlight
+--- @field altfont? boolean
+--- @field blink? boolean
 --- @field bold? boolean
+--- @field conceal? boolean
+--- @field dim? boolean
+--- @field italic? boolean
+--- @field nocombine? boolean
+--- @field overline? boolean
+--- @field reverse? boolean
 --- @field standout? boolean
 --- @field strikethrough? boolean
---- @field underline? boolean
 --- @field undercurl? boolean
---- @field underdouble? boolean
---- @field underdotted? boolean
 --- @field underdashed? boolean
---- @field italic? boolean
---- @field reverse? boolean
---- @field altfont? boolean
---- @field nocombine? boolean
+--- @field underdotted? boolean
+--- @field underdouble? boolean
+--- @field underline? boolean
 --- @field default? boolean
 --- @field cterm? vim.api.keyset.highlight_cterm
 --- @field foreground? integer|string
@@ -338,6 +343,10 @@ error('Cannot require a meta file')
 --- @field italic? boolean
 --- @field reverse? boolean
 --- @field altfont? boolean
+--- @field dim? boolean
+--- @field blink? boolean
+--- @field conceal? boolean
+--- @field overline? boolean
 --- @field nocombine? boolean
 
 --- @class vim.api.keyset.keymap
@@ -428,6 +437,9 @@ error('Cannot require a meta file')
 --- @field scoped? boolean
 --- @field _subpriority? integer
 
+--- @class vim.api.keyset.tabpage_config
+--- @field after? integer
+
 --- @class vim.api.keyset.user_command
 --- @field addr? any
 --- @field bang? boolean
@@ -453,14 +465,14 @@ error('Cannot require a meta file')
 --- @field mouse? boolean
 --- @field relative? "cursor"|"editor"|"laststatus"|"mouse"|"tabline"|"win"
 --- @field row? number
---- @field style? "minimal"
+--- @field style? ""|"minimal"
 --- @field noautocmd? boolean
 --- @field vertical? boolean
 --- @field win? integer
 --- @field width? integer
 --- @field zindex? integer
 --- @field anchor? "NW"|"NE"|"SW"|"SE"
---- @field border? string[]|"none"|"single"|"double"|"rounded"|"solid"|"shadow"
+--- @field border? any[]|"none"|"single"|"double"|"rounded"|"solid"|"shadow"
 --- @field bufpos? integer[]
 --- @field col? number
 --- @field split? "left"|"right"|"above"|"below"

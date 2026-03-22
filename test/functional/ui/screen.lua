@@ -671,7 +671,7 @@ screen:redraw_debug() to show all intermediate screen states.]]
     -- the ext_ feature being disabled, or the feature currently not activated
     -- (e.g. no external cmdline visible). Some extensions require
     -- preprocessing to represent highlights in a reproducible way.
-    local extstate = self:_extstate_repr(attr_state)
+    local extstate = self:_extstate_repr(attr_state, expected)
     if expected.mode ~= nil then
       extstate.mode = self.mode
     end
@@ -800,6 +800,7 @@ function Screen:_wait(check, flags)
   local minimal_timeout = default_timeout_factor * 2
 
   local immediate_seen, intermediate_seen = false, false
+  local intermediate_state_snapshot = ''
   if not check() then
     minimal_timeout = default_timeout_factor * 20
     immediate_seen = true
@@ -809,6 +810,8 @@ function Screen:_wait(check, flags)
   -- must not change, so always wait this full time.
   if flags.unchanged then
     minimal_timeout = flags.timeout or default_timeout_factor * 20
+  elseif flags.intermediate then
+    minimal_timeout = default_timeout_factor * 20
   end
 
   assert(timeout >= minimal_timeout)
@@ -826,6 +829,10 @@ function Screen:_wait(check, flags)
     err = check()
     checked = true
     if err and immediate_seen then
+      if not intermediate_seen and flags.unchanged then
+        -- Save the first intermediate state for the error message.
+        intermediate_state_snapshot = self:_print_snapshot()
+      end
       intermediate_seen = true
     end
 
@@ -914,10 +921,14 @@ between asynchronous (feed(), nvim_input()) and synchronous API calls.
     print(string.sub(tb, 1, index))
   end
 
-  if flags.intermediate then
-    assert(intermediate_seen, 'expected intermediate screen state before final screen state')
-  elseif flags.unchanged then
-    assert(not intermediate_seen, 'expected screen state to be unchanged')
+  if flags.intermediate and not intermediate_seen then
+    busted.fail('Expected intermediate screen state before final screen state', 3)
+  elseif flags.unchanged and intermediate_seen then
+    busted.fail(
+      'Expected screen state to be unchanged.\nIntermediate screen state:\n'
+        .. intermediate_state_snapshot,
+      3
+    )
   end
 end
 
@@ -1438,7 +1449,7 @@ function Screen:_handle_wildmenu_hide()
   self.wildmenu_items, self.wildmenu_pos = nil, nil
 end
 
-function Screen:_handle_msg_show(kind, chunks, replace_last, history, append, id, progress)
+function Screen:_handle_msg_show(kind, chunks, replace_last, history, append, id, trigger)
   local pos = #self.messages
   if not replace_last or pos == 0 then
     pos = pos + 1
@@ -1449,7 +1460,7 @@ function Screen:_handle_msg_show(kind, chunks, replace_last, history, append, id
     history = history,
     append = append,
     id = id,
-    progress = progress,
+    trigger = trigger,
   }
 end
 
@@ -1558,7 +1569,7 @@ local function hl_id_to_name(self, id)
   return id and self.hl_names[id] or nil
 end
 
-function Screen:_extstate_repr(attr_state)
+function Screen:_extstate_repr(attr_state, exp)
   local cmdline = {}
   for i, entry in pairs(self.cmdline) do
     entry = shallowcopy(entry)
@@ -1576,13 +1587,18 @@ function Screen:_extstate_repr(attr_state)
 
   local messages = {}
   for i, entry in ipairs(self.messages) do
+    local trigger = nil
+    if exp and exp.messages and exp.messages[i] and exp.messages[i].trigger ~= nil then
+      -- Late addition, only include when expected state includes it.
+      trigger = entry.trigger
+    end
     messages[i] = {
       kind = entry.kind,
       content = self:_chunks_repr(entry.content, attr_state),
       history = entry.history or nil,
       append = entry.append or nil,
       id = entry.kind == 'progress' and entry.id or nil,
-      progress = entry.kind == 'progress' and entry.progress or nil,
+      trigger = trigger,
     }
   end
 
@@ -1788,9 +1804,14 @@ local function fmt_ext_state(name, state)
   elseif name == 'float_pos' then
     local str = '{\n'
     for k, v in pairs(state) do
-      str = str .. '  [' .. k .. '] = {' .. v[1]
-      for i = 2, #v do
-        str = str .. ', ' .. inspect(v[i])
+      str = str .. '  [' .. k .. '] = {'
+      if v.external then
+        str = str .. ' external = true '
+      else
+        str = str .. v[1]
+        for i = 2, #v do
+          str = str .. ', ' .. inspect(v[i])
+        end
       end
       str = str .. '};\n'
     end

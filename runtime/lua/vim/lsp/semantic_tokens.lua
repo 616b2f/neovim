@@ -365,6 +365,9 @@ function STHighlighter:send_range_request(client, state, version)
 
     -- Only process range response if we got a valid response and don't have a full result yet
     if err or not response or state.has_full_result then
+      if err then
+        vim.lsp.log.error('semantic_tokens', err)
+      end
       active_request.request_id = nil
       active_request.version = nil
       return
@@ -423,6 +426,9 @@ function STHighlighter:send_full_delta_request(client, state, version)
     end
 
     if err or not response then
+      if err then
+        vim.lsp.log.error('semantic_tokens', err)
+      end
       active_request.request_id = nil
       active_request.version = nil
       return
@@ -1010,9 +1016,9 @@ end
 --- mark will be deleted by the semantic token engine when appropriate; for
 --- example, when the LSP sends updated tokens. This function is intended for
 --- use inside |LspTokenUpdate| callbacks.
----@param token (table) A semantic token, found as `args.data.token` in |LspTokenUpdate|
----@param bufnr (integer) The buffer to highlight, or `0` for current buffer
----@param client_id (integer) The ID of the |vim.lsp.Client|
+---@param token (table) Semantic token, provided as `ev.data.token` in |LspTokenUpdate|
+---@param bufnr (integer) Buffer to highlight, or `0` for current buffer.
+---@param client_id (integer) ID of the |vim.lsp.Client|
 ---@param hl_group (string) Highlight group name
 ---@param opts? vim.lsp.semantic_tokens.highlight_token.Opts  Optional parameters:
 function M.highlight_token(token, bufnr, client_id, hl_group, opts)

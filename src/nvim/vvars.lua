@@ -1,12 +1,30 @@
 local M = {}
 
 M.vars = {
+  argf = {
+    type = 'string[]',
+    desc = [=[
+      File arguments (expanded to absolute paths) given at startup.
+
+      Unlike |v:argv|, this does not include option arguments
+      such as `-u`, `--cmd`, or `+cmd`. Unlike |argv()|, it is not
+      affected by later |:args|, |:argadd|, or plugin modifications.
+
+      Example: >
+        nvim file1.txt +ls -- file2.txt
+        :echo v:argf
+        " ['/path/to/cwd/file1.txt', '/path/to/cwd/file2.txt']
+      <
+    ]=],
+  },
   argv = {
     type = 'string[]',
     desc = [=[
-      The command line arguments Vim was invoked with.  This is a
-      list of strings.  The first item is the Vim command.
-      See |v:progpath| for the command with full path.
+      Command line arguments (`-u`, `--cmd`, `+cmd`, …) Nvim was
+      invoked with.  The first item is the Nvim command.
+
+      See |v:progpath| to get the full path to Nvim.
+      See |v:argf| to get only file args, without other options.
     ]=],
   },
   char = {
@@ -126,7 +144,9 @@ M.vars = {
     type = 'integer',
     desc = [=[
       Number of screen cells that can be used for an `:echo` message
-      in the last screen line before causing the |hit-enter-prompt|.
+      in the last screen line before causing the |hit-enter| prompt
+      (or "overflow" with |ui2|).
+
       Depends on 'showcmd', 'ruler' and 'columns'.  You need to
       check 'cmdheight' for whether there are full-width lines
       available above the last line.
@@ -648,8 +668,6 @@ M.vars = {
       screen to scroll up.  It's only set when it is empty, thus the
       first reason is remembered.  It is set to "Unknown" for a
       typed command.
-      This can be used to find out why your script causes the
-      hit-enter prompt.
     ]=],
   },
   searchforward = {

@@ -126,14 +126,14 @@ typedef struct {
   Boolean mouse;
   Enum("cursor", "editor", "laststatus", "mouse", "tabline", "win") relative;
   Float row;
-  Enum("minimal") style;
+  Enum("", "minimal") style;
   Boolean noautocmd;
   Boolean vertical;
   Window win;
   Integer width;
   Integer zindex;
   Enum("NW", "NE", "SW", "SE") anchor;
-  Union(ArrayOf(String), Enum("none", "single", "double", "rounded", "solid", "shadow")) border;
+  Union(Array, Enum("none", "single", "double", "rounded", "solid", "shadow")) border;
   ArrayOf(Integer) bufpos;
   Float col;
   Enum("left", "right", "above", "below") split;
@@ -141,6 +141,11 @@ typedef struct {
   Enum("center", "left", "right") title_pos;
   Integer _cmdline_offset;
 } Dict(win_config);
+
+typedef struct {
+  OptionalKeys is_set__tabpage_config_;
+  Integer after;
+} Dict(tabpage_config);
 
 typedef struct {
   Boolean is_lua;
@@ -168,18 +173,22 @@ typedef struct {
 
 typedef struct {
   OptionalKeys is_set__highlight_;
+  Boolean altfont;
+  Boolean blink;
   Boolean bold;
+  Boolean conceal;
+  Boolean dim;
+  Boolean italic;
+  Boolean nocombine;
+  Boolean overline;
+  Boolean reverse;
   Boolean standout;
   Boolean strikethrough;
-  Boolean underline;
   Boolean undercurl;
-  Boolean underdouble;
-  Boolean underdotted;
   Boolean underdashed;
-  Boolean italic;
-  Boolean reverse;
-  Boolean altfont;
-  Boolean nocombine;
+  Boolean underdotted;
+  Boolean underdouble;
+  Boolean underline;
   Boolean default_ DictKey(default);
   DictAs(highlight_cterm) cterm;
   Union(Integer, String) foreground;
@@ -212,6 +221,10 @@ typedef struct {
   Boolean italic;
   Boolean reverse;
   Boolean altfont;
+  Boolean dim;
+  Boolean blink;
+  Boolean conceal;
+  Boolean overline;
   Boolean nocombine;
 } Dict(highlight_cterm);
 

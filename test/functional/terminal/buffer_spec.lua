@@ -7,7 +7,7 @@ local assert_alive = n.assert_alive
 local feed, clear = n.feed, n.clear
 local poke_eventloop = n.poke_eventloop
 local nvim_prog = n.nvim_prog
-local eval, feed_command, source = n.eval, n.feed_command, n.source
+local eval, source = n.eval, n.source
 local pcall_err = t.pcall_err
 local eq, neq = t.eq, t.neq
 local api = n.api
@@ -15,7 +15,6 @@ local retry = t.retry
 local testprg = n.testprg
 local write_file = t.write_file
 local command = n.command
-local exc_exec = n.exc_exec
 local matches = t.matches
 local exec_lua = n.exec_lua
 local sleep = vim.uv.sleep
@@ -110,42 +109,38 @@ describe(':terminal buffer', function()
 
   it('sends data to the terminal when the "put" operator is used', function()
     feed('<c-\\><c-n>gg"ayj')
-    feed_command('let @a = "appended " . @a')
+    fn.setreg('a', 'appended ' .. fn.getreg('a'))
     feed('"ap"ap')
     screen:expect([[
       ^tty ready                                         |
       appended tty ready                                |*2
-                                                        |
-                                                        |*2
-      :let @a = "appended " . @a                        |
+                                                        |*4
     ]])
     -- operator count is also taken into consideration
     feed('3"ap')
     screen:expect([[
       ^tty ready                                         |
       appended tty ready                                |*5
-      :let @a = "appended " . @a                        |
+                                                        |
     ]])
   end)
 
   it('sends data to the terminal when the ":put" command is used', function()
     feed('<c-\\><c-n>gg"ayj')
-    feed_command('let @a = "appended " . @a')
-    feed_command('put a')
+    fn.setreg('a', 'appended ' .. fn.getreg('a'))
+    feed(':put a<CR>')
     screen:expect([[
       ^tty ready                                         |
       appended tty ready                                |
-                                                        |
-                                                        |*3
+                                                        |*4
       :put a                                            |
     ]])
     -- line argument is only used to move the cursor
-    feed_command('6put a')
+    feed(':6put a<CR>')
     screen:expect([[
       tty ready                                         |
       appended tty ready                                |*2
-                                                        |
-                                                        |
+                                                        |*2
       ^                                                  |
       :6put a                                           |
     ]])
@@ -158,7 +153,7 @@ describe(':terminal buffer', function()
       {100:~                                                 }|*5
       :bd!                                              |
     ]])
-    feed_command('bnext')
+    feed(':bnext<CR>')
     screen:expect([[
       ^                                                  |
       {100:~                                                 }|*5
@@ -197,24 +192,24 @@ describe(':terminal buffer', function()
     ]])
 
     neq(tbuf, eval('bufnr("%")'))
-    feed_command('quit!') -- Should exit the new window, not the terminal.
+    command('quit!') -- Should exit the new window, not the terminal.
     eq(tbuf, eval('bufnr("%")'))
   end)
 
   describe('handles confirmations', function()
     it('with :confirm', function()
       feed('<c-\\><c-n>')
-      feed_command('confirm bdelete')
+      feed(':confirm bdelete<CR>')
       screen:expect { any = 'Close "term://' }
     end)
 
     it('with &confirm', function()
       feed('<c-\\><c-n>')
-      feed_command('bdelete')
+      feed(':bdelete<CR>')
       screen:expect { any = 'E89' }
       feed('<cr>')
       eq('terminal', eval('&buftype'))
-      feed_command('set confirm | bdelete')
+      feed(':set confirm | bdelete<CR>')
       screen:expect { any = 'Close "term://' }
       feed('y')
       neq('terminal', eval('&buftype'))
@@ -235,13 +230,13 @@ describe(':terminal buffer', function()
   end)
 
   it('requires bang (!) to close a running job #15402', function()
-    eq('Vim(wqall):E948: Job still running (add ! to end the job)', exc_exec('wqall'))
+    eq('Vim(wqall):E948: Job still running (add ! to end the job)', pcall_err(command, 'wqall'))
     for _, cmd in ipairs({ 'bdelete', '%bdelete', 'bwipeout', 'bunload' }) do
       matches(
         '^Vim%('
           .. cmd:gsub('%%', '')
           .. '%):E89: term://.*tty%-test.* will be killed %(add %! to override%)$',
-        exc_exec(cmd)
+        pcall_err(command, cmd)
       )
     end
     command('call jobstop(&channel)')
@@ -263,7 +258,7 @@ describe(':terminal buffer', function()
 
   it('does not segfault when pasting empty register #13955', function()
     feed('<c-\\><c-n>')
-    feed_command('put a') -- register a is empty
+    command('put a') -- register a is empty
     n.assert_alive()
   end)
 
@@ -281,8 +276,7 @@ describe(':terminal buffer', function()
     feed [[:let g:x = 17]]
     screen:expect([[
       tty ready                                         |
-                                                        |
-                                                        |*4
+                                                        |*5
       :let g:x = 17^                                     |
     ]])
 
@@ -304,7 +298,7 @@ describe(':terminal buffer', function()
     screen:expect_unchanged()
     for i = 1, 10 do
       eq({ mode = 't', blocking = true }, api.nvim_get_mode())
-      vim.uv.sleep(10) -- Wait for the previously scheduled refresh timer to arrive
+      vim.uv.sleep(15) -- Wait for the previously scheduled refresh timer to arrive
       feed('j') -- Refresh scheduled for the last 'j' and processed for the one before
       screen:expect(([[
         tty ready                                         |
@@ -337,13 +331,12 @@ describe(':terminal buffer', function()
     screen:expect_unchanged()
     for i = 1, 10 do
       eq({ mode = 'nt', blocking = true }, api.nvim_get_mode())
-      vim.uv.sleep(10) -- Wait for the previously scheduled refresh timer to arrive
+      vim.uv.sleep(15) -- Wait for the previously scheduled refresh timer to arrive
       feed('j') -- Refresh scheduled for the last 'j' and processed for the one before
       screen:expect(([[
         tty ready                                         |
         ^%s%s|
-                                                          |*4
-                                                          |
+                                                          |*5
       ]]):format(('j'):rep(i), (' '):rep(50 - i)))
     end
     feed('l') -- No partial mapping, so all pending refreshes should be processed
@@ -429,12 +422,12 @@ describe(':terminal buffer', function()
     exec_lua(function()
       _G.last_event = nil
       vim.api.nvim_create_autocmd({ 'TermEnter', 'TermLeave' }, {
-        callback = function(args)
-          _G.last_event = args.event
+        callback = function(ev)
+          _G.last_event = ev.event
             .. ' '
-            .. vim.fs.basename(args.file)
+            .. vim.fs.basename(ev.file)
             .. ' '
-            .. tostring(vim.b[args.buf].term_focused)
+            .. tostring(vim.b[ev.buf].term_focused)
         end,
       })
     end)
@@ -713,8 +706,8 @@ describe(':terminal buffer', function()
           force_crlf = false,
         })
         vim.api.nvim_create_autocmd('TermRequest', {
-          callback = function(args)
-            if args.data.sequence == '\027]11;?' then
+          callback = function(ev)
+            if ev.data.sequence == '\027]11;?' then
               table.insert(_G.input, '\027]11;rgb:0000/0000/0000\027\\')
             end
           end
@@ -765,8 +758,8 @@ describe(':terminal buffer', function()
         _G.cursor = {}
         local term = vim.api.nvim_open_term(0, {})
         vim.api.nvim_create_autocmd('TermRequest', {
-          callback = function(args)
-            _G.cursor = args.data.cursor
+          callback = function(ev)
+            _G.cursor = ev.data.cursor
           end
         })
         return term
@@ -931,19 +924,18 @@ describe(':terminal buffer', function()
     finally(function()
       os.remove(testfilename)
     end)
-    feed_command('edit ' .. testfilename)
+    feed(':edit ' .. testfilename .. '<CR>')
     -- Move cursor away from the beginning of the line
     feed('$')
     -- Let jobstart(…,{term=true}) modify the buffer
-    feed_command([[call jobstart("echo", {'term':v:true})]])
+    fn.jobstart('echo', { term = true })
     assert_alive()
-    feed_command('bdelete!')
+    command('bdelete!')
   end)
 
   it('no heap-buffer-overflow when sending long line with nowrap #11548', function()
-    feed_command('set nowrap')
-    feed_command('autocmd TermOpen * startinsert')
-    feed_command('call feedkeys("4000ai\\<esc>:terminal!\\<cr>")')
+    command('set nowrap | autocmd TermOpen * startinsert')
+    feed(':call feedkeys("4000ai\\<esc>:terminal!\\<cr>")<CR>')
     assert_alive()
   end)
 
@@ -994,17 +986,18 @@ describe(':terminal buffer', function()
       3: å̲│{1:~                                            }|
           │{1:~                                            }|
       [Pro│{1:~                                            }|
-      cess│{1:~                                            }|
+          │{1:~                                            }|
                                                         |
     ]])
   end)
 
   --- @param subcmd 'REP'|'REPFAST'
-  local function check_term_rep(subcmd, count)
+  local function check_term_rep(subcmd, count, scrollback)
     local screen = Screen.new(50, 7)
+    api.nvim_set_option_value('scrollback', scrollback, {})
     api.nvim_create_autocmd('TermClose', { command = 'let g:did_termclose = 1' })
     fn.jobstart({ testprg('shell-test'), subcmd, count, 'TEST' }, { term = true })
-    retry(nil, nil, function()
+    retry(nil, 10000 + count, function()
       eq(1, api.nvim_get_var('did_termclose'))
     end)
     feed('i')
@@ -1013,28 +1006,29 @@ describe(':terminal buffer', function()
       %d: TEST{MATCH: +}|
       %d: TEST{MATCH: +}|
       %d: TEST{MATCH: +}|
-                                                        |
-      [Process exited 0]^                                |
+      %d: TEST{MATCH: +}|
+      ^[Process exited 0]                                |
       {5:-- TERMINAL --}                                    |
-    ]]):format(count - 4, count - 3, count - 2, count - 1))
+    ]]):format(count - 5, count - 4, count - 3, count - 2, count - 1))
     local lines = api.nvim_buf_get_lines(0, 0, -1, true)
-    for i = 1, count do
-      eq(('%d: TEST'):format(i - 1), lines[i])
+    local start = math.max(count + 1 - scrollback - 6, 0)
+    for i = start, count - 1 do
+      eq(('%d: TEST'):format(i), lines[i - start + 1])
     end
+    eq('', lines[#lines])
+    eq(count - start + 1, #lines)
   end
 
   it('does not drop data when job exits immediately after output #3030', function()
-    api.nvim_set_option_value('scrollback', 30000, {})
-    check_term_rep('REPFAST', 20000)
+    check_term_rep('REPFAST', 20000, 30000)
   end)
 
   it('does not drop data when autocommands poll for events #37559', function()
-    api.nvim_set_option_value('scrollback', 30000, {})
     api.nvim_create_autocmd('BufFilePre', { command = 'sleep 50m', nested = true })
     api.nvim_create_autocmd('BufFilePost', { command = 'sleep 50m', nested = true })
     api.nvim_create_autocmd('TermOpen', { command = 'sleep 50m', nested = true })
     -- REP pauses 1 ms every 100 lines, so each autocommand processes some output.
-    check_term_rep('REP', 20000)
+    check_term_rep('REP', 20000, 30000)
   end)
 
   describe('scrollback is correct if all output is drained by', function()
@@ -1045,10 +1039,41 @@ describe(':terminal buffer', function()
           it(('%.1f * terminal refresh delay'):format(delay / 10), function()
             local cmd = ('sleep %dm'):format(delay)
             api.nvim_create_autocmd(event, { command = cmd, nested = true })
-            check_term_rep('REPFAST', 200)
+            check_term_rep('REPFAST', 200, 10000)
           end)
         end
       end)
+    end
+  end)
+
+  it('scrollback is correct if buffer update callbacks poll for uv events', function()
+    -- Use vim.regex:match_str(), which may poll for uv events.
+    exec_lua(function()
+      local regex = vim.regex([[^\d\+: TEST]])
+      _G.matched_lines = {} --- @type table<string,boolean>
+      vim.api.nvim_create_autocmd('TermOpen', {
+        callback = function(ev)
+          vim.api.nvim_buf_attach(ev.buf, false, {
+            on_lines = function(_, buf, _, first, _, last, _)
+              local lines = vim.api.nvim_buf_get_lines(buf, first, last, true)
+              for _, line in ipairs(lines) do
+                if regex:match_str(line) then
+                  _G.matched_lines[vim.trim(line)] = true
+                end
+              end
+            end,
+          })
+        end,
+      })
+    end)
+    -- Use a 'scrollback' value smaller than the number of printed lines.
+    -- REP pauses 1 ms every 100 lines, so this can take at least 20 refresh cycles.
+    check_term_rep('REP', 20000, 10000)
+    -- Check that buffer update callbacks have seen all output lines.
+    local matched_lines = exec_lua('return _G.matched_lines')
+    for i = 0, 19999 do
+      local line = ('%d: TEST'):format(i)
+      eq(true, matched_lines[line], line)
     end
   end)
 
@@ -1152,6 +1177,26 @@ describe(':terminal buffer', function()
                                                         |
     ]])
     eq(false, api.nvim_buf_is_valid(term_buf))
+  end)
+
+  it('no heap-use-after-free from autocmds when entering terminal mode', function()
+    local buf = api.nvim_get_current_buf()
+    local chan = api.nvim_open_term(0, {})
+    command('autocmd TermEnter,ModeChanged * ++once bwipeout!')
+    feed('i')
+    eq(false, api.nvim_buf_is_valid(buf))
+    eq({}, api.nvim_get_chan_info(chan))
+    eq('n', fn.mode())
+
+    -- Remain in Terminal mode if autocmds put us in a different terminal.
+    buf = api.nvim_get_current_buf()
+    chan = api.nvim_open_term(0, {})
+    command('autocmd TermEnter,ModeChanged * ++once bwipeout! | let g:chan = nvim_open_term(0, {})')
+    feed('i')
+    eq(false, api.nvim_buf_is_valid(buf))
+    eq({}, api.nvim_get_chan_info(chan))
+    eq(api.nvim_get_current_buf(), api.nvim_get_chan_info(eval('g:chan')).buffer)
+    eq('t', fn.mode())
   end)
 
   local enew_screen = [[
@@ -1432,18 +1477,21 @@ describe('on_lines does not emit out-of-bounds line indexes when', function()
   end)
 
   it('creating a terminal buffer #16394', function()
-    feed_command('autocmd TermOpen * ++once call v:lua.register_callback(str2nr(expand("<abuf>")))')
-    feed_command('terminal')
+    command('autocmd TermOpen * ++once call v:lua.register_callback(str2nr(expand("<abuf>")))')
+    command('terminal')
     sleep(500)
     eq('', exec_lua([[return _G.cb_error]]))
   end)
 
   it('deleting a terminal buffer #16394', function()
-    feed_command('terminal')
+    command('terminal')
     sleep(500)
-    feed_command('lua _G.register_callback(0)')
-    feed_command('bdelete!')
-    eq('', exec_lua([[return _G.cb_error]]))
+    local cb_error = exec_lua([[
+      _G.register_callback(0)
+      vim.cmd('bdelete!')
+      return _G.cb_error
+    ]])
+    eq('', cb_error)
   end)
 end)
 
@@ -1621,7 +1669,7 @@ if is_os('win') then
 
     before_each(function()
       clear()
-      feed_command('set modifiable swapfile undolevels=20')
+      command('set modifiable swapfile undolevels=20')
       poke_eventloop()
       local cmd = { 'cmd.exe', '/K', 'PROMPT=$g$s' }
       screen = tt.setup_screen(nil, cmd)
@@ -1629,8 +1677,8 @@ if is_os('win') then
 
     it('"put" operator sends data normally', function()
       feed('<c-\\><c-n>G')
-      feed_command('let @a = ":: tty ready"')
-      feed_command('let @a = @a . "\\n:: appended " . @a . "\\n\\n"')
+      local s = ':: tty ready'
+      fn.setreg('a', s .. '\n:: appended ' .. s .. '\n\n')
       feed('"ap"ap')
       screen:expect([[
                                                         |
@@ -1639,7 +1687,7 @@ if is_os('win') then
       > :: tty ready                                    |
       > :: appended :: tty ready                        |
       ^>                                                 |
-      :let @a = @a . "\n:: appended " . @a . "\n\n"     |
+                                                        |
       ]])
       -- operator count is also taken into consideration
       feed('3"ap')
@@ -1650,15 +1698,15 @@ if is_os('win') then
       > :: tty ready                                    |
       > :: appended :: tty ready                        |
       ^>                                                 |
-      :let @a = @a . "\n:: appended " . @a . "\n\n"     |
+                                                        |
       ]])
     end)
 
     it('":put" command sends data normally', function()
       feed('<c-\\><c-n>G')
-      feed_command('let @a = ":: tty ready"')
-      feed_command('let @a = @a . "\\n:: appended " . @a . "\\n\\n"')
-      feed_command('put a')
+      local s = ':: tty ready'
+      fn.setreg('a', s .. '\n:: appended ' .. s .. '\n\n')
+      feed(':put a<CR>')
       screen:expect([[
                                                         |
       > :: tty ready                                    |
@@ -1669,7 +1717,7 @@ if is_os('win') then
       :put a                                            |
       ]])
       -- line argument is only used to move the cursor
-      feed_command('6put a')
+      feed(':6put a<CR>')
       screen:expect([[
                                                         |
       > :: tty ready                                    |

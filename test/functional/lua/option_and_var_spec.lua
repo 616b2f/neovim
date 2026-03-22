@@ -128,8 +128,9 @@ describe('lua stdlib', function()
 
       -- Check if autoload works properly
       local pathsep = n.get_pathsep()
-      local xconfig = 'Xhome' .. pathsep .. 'Xconfig'
-      local xdata = 'Xhome' .. pathsep .. 'Xdata'
+      local xhome = 'Xhome_lua'
+      local xconfig = xhome .. pathsep .. 'Xconfig'
+      local xdata = xhome .. pathsep .. 'Xdata'
       local autoload_folder = table.concat({ xconfig, 'nvim', 'autoload' }, pathsep)
       local autoload_file = table.concat({ autoload_folder, 'testload.vim' }, pathsep)
       mkdir_p(autoload_folder)
@@ -138,7 +139,7 @@ describe('lua stdlib', function()
       clear { args_rm = { '-u' }, env = { XDG_CONFIG_HOME = xconfig, XDG_DATA_HOME = xdata } }
 
       eq(2, exec_lua("return vim.g['testload#value']"))
-      rmdir('Xhome')
+      rmdir(xhome)
     end)
 
     it('vim.b', function()
@@ -777,7 +778,7 @@ describe('lua stdlib', function()
           eq(true, not formatoptions.q)
         end)
 
-        it('works for array list type options', function()
+        it('works for comma list type options', function()
           local wildignore = exec_lua(function()
             vim.opt.wildignore = '*.c,*.o,__pycache__'
             return vim.opt.wildignore:get()
@@ -785,6 +786,13 @@ describe('lua stdlib', function()
 
           eq(3, #wildignore)
           eq('*.c', wildignore[1])
+        end)
+
+        it('works for array list type options', function()
+          eq_exec_lua({ eol = '~', space = '-' }, function()
+            vim.opt.listchars = { 'eol:~', 'space:-' }
+            return vim.opt.listchars:get()
+          end)
         end)
 
         it('works for options that are both commalist and flaglist', function()

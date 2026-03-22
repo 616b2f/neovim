@@ -164,10 +164,12 @@ you never want any default mappings, call |:mapclear| early in your config.
 - |[<Space>| |]<Space>|
 - LSP defaults |lsp-defaults|
   - K |K-lsp-default|
-  - |v_an| |v_in|
   - gr prefix |gr-default|
     - |gra| |gri| |grn| |grr| |grt|
   - <C-S> |i_CTRL-S|
+- Treesitter defaults |treesitter-defaults|
+  - |v_an| |v_in|
+  - |v_]n| |v_[n|
 
 DEFAULT AUTOCOMMANDS
                                                         *default-autocmds*
@@ -178,6 +180,7 @@ nvim.terminal:
 - BufReadCmd: Treats "term://" buffers as |terminal| buffers. |terminal-start|
 - TermClose: A |terminal| buffer started with no arguments (which thus uses
   'shell') and which exits with no error is closed automatically.
+- TermClose: Displays the "[Process exited]" virtual text.
 - TermRequest: The terminal emulator responds to OSC background and foreground
   requests, indicating (1) a black background and white foreground when Nvim
   option 'background' is "dark" or (2) a white background and black foreground
@@ -425,6 +428,8 @@ Options:
 - 'winblend'    pseudo-transparency in floating windows |api-floatwin|
 - 'winhighlight' window-local highlights
 - 'busy' busy status for buffers
+- 'messagesopt' added progress:c to control if progress messages are shown in
+  cmdline
 
 Performance:
 - Signs are implemented using Nvim's internal "marktree" (btree) structure.
@@ -753,6 +758,8 @@ Eval:
 - *err_teapot()*
 - *js_encode()*
 - *js_decode()*
+- *listener_add()* , etc: use |api-buffer-updates-lua| instead.
+- *redraw_listener_add()* , etc:  use |nvim_set_decoration_provider()| instead.
 - *v:none* (used by Vim to represent JavaScript "undefined"); use |v:null| instead.
 - *v:sizeofint*
 - *v:sizeoflong*

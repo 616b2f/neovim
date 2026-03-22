@@ -653,14 +653,10 @@ local directive_handlers = {
     end
 
     metadata[capture_id].offset = {
-      pred[3] --[[@as integer]]
-        or 0,
-      pred[4] --[[@as integer]]
-        or 0,
-      pred[5] --[[@as integer]]
-        or 0,
-      pred[6] --[[@as integer]]
-        or 0,
+      pred[3] --[[@as integer]] or 0,
+      pred[4] --[[@as integer]] or 0,
+      pred[5] --[[@as integer]] or 0,
+      pred[6] --[[@as integer]] or 0,
     }
   end,
   -- Transform the content of the node
@@ -1197,10 +1193,8 @@ end
 --- parsers.
 ---
 --- If you move the cursor to a capture name ("@foo"), text matching the capture is highlighted
---- with |hl-DiagnosticVirtualTextHint| in the source buffer.
----
---- The query editor is a scratch buffer, use `:write` to save it. You can find example queries
---- at `$VIMRUNTIME/queries/`.
+--- with |hl-DiagnosticVirtualTextHint| in the source buffer. The query editor is a scratch buffer,
+--- use `:write` to save it. You can find example queries at `$VIMRUNTIME/queries/`.
 ---
 --- @param lang? string language to open the query editor for. If omitted, inferred from the current buffer's filetype.
 function M.edit(lang)

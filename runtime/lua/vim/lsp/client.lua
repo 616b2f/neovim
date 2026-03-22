@@ -68,9 +68,11 @@ local all_clients = {}
 --- (default: `true`)
 --- @field detached? boolean
 ---
---- Milliseconds to wait for server to exit cleanly after sending the "shutdown" request before
---- sending kill -15. If set to false, waits indefinitely. If set to true, nvim will kill the
---- server immediately.
+--- Decides if/when to force-stop the server after sending the "shutdown" request. See |Client:stop()|.
+--- Note: when Nvim itself is exiting,
+--- - `false`: Nvim will not force-stop LSP server(s).
+--- - `true`: Nvim will force-stop LSP server(s) that did not comply with the "shutdown" request.
+--- - `number`: Nvim will wait up to `exit_timeout` milliseconds before performing force-stop.
 --- (default: `false`)
 --- @field exit_timeout? integer|boolean
 ---
@@ -156,9 +158,7 @@ local all_clients = {}
 --- Capabilities provided at runtime (after startup).
 --- @field dynamic_capabilities lsp.DynamicCapabilities
 ---
---- Milliseconds to wait for server to exit cleanly after sending the "shutdown" request before
---- sending kill -15. If set to false, waits indefinitely. If set to true, nvim will kill the
---- server immediately.
+--- See [vim.lsp.ClientConfig].
 --- (default: `false`)
 --- @field exit_timeout integer|boolean
 ---
@@ -527,6 +527,7 @@ function Client:initialize()
   require('vim.lsp.semantic_tokens')
   require('vim.lsp._folding_range')
   require('vim.lsp.inline_completion')
+  require('vim.lsp.document_color')
 
   local init_params = {
     -- The process Id of the parent process that started the server. Is null if
@@ -713,10 +714,8 @@ end
 --- @see |vim.lsp.buf_request_all()|
 function Client:request(method, params, handler, bufnr)
   if not handler then
-    handler = assert(
-      self:_resolve_handler(method),
-      string.format('not found: %q request handler for client %q.', method, self.name)
-    )
+    handler = self:_resolve_handler(method)
+      or error(('not found: %q request handler for client %q.'):format(method, self.name))
   end
   -- Ensure pending didChange notifications are sent so that the server doesn't operate on a stale state
   changetracking.flush(self, bufnr)
@@ -852,20 +851,19 @@ end
 
 --- Stops a client, optionally with force after a timeout.
 ---
---- By default, it will request the server to shutdown, then force a shutdown
---- if the server has not exited after `self.exit_timeout` milliseconds. If
---- you request to stop a client which has previously been requested to
---- shutdown, it will automatically escalate and force shutdown immediately,
---- regardless of the value of `force` (or `self.exit_timeout` if `nil`).
+--- By default this sends a "shutdown" request to the server, escalating to force-stop if the server
+--- has not exited after `self.exit_timeout` milliseconds (unless `exit_timeout=false`).
+--- Calling stop() on a client that was previously requested to shutdown, will escalate to
+--- force-stop immediately, regardless of `force` (or `self.exit_timeout` if `force=nil`).
 ---
---- Note: Forcing shutdown while a server is busy writing out project or index
---- files can lead to file corruption.
+--- Note: Forcing shutdown while a server is busy writing out project or index files can lead to
+--- file corruption.
 ---
---- @param force? integer|boolean Time in milliseconds to wait before forcing
----                               a shutdown. If false, only request the
----                               server to shutdown, but don't force it. If
----                               true, force a shutdown immediately.
----                               (default: `self.exit_timeout`)
+--- @param force? integer|boolean (default: `self.exit_timeout`) Decides whether to force-stop the server.
+--- - `nil`: Defaults to `exit_timeout` from |vim.lsp.ClientConfig|.
+--- - `true`: Force-stop after "shutdown" request.
+--- - `false`: Do not force-stop after "shutdown" request.
+--- - number: Wait up to `force` milliseconds before force-stop.
 function Client:stop(force)
   validate('force', force, { 'number', 'boolean' }, true)
 
@@ -1140,10 +1138,6 @@ function Client:on_attach(bufnr)
   self:_text_document_did_open_handler(bufnr)
 
   lsp._set_defaults(self, bufnr)
-  -- `enable(true)` cannot be called from `_set_defaults` for features with dynamic registration,
-  -- because it overrides the state every time `client/registerCapability` is received.
-  -- To allow disabling it once in `LspAttach`, we enable it once here instead.
-  lsp.document_color.enable(true, bufnr)
 
   api.nvim_exec_autocmds('LspAttach', {
     buffer = bufnr,
@@ -1230,38 +1224,47 @@ function Client:supports_method(method, bufnr)
   return required_capability == nil
 end
 
---- Retrieves all capability values for a given LSP method, handling both static and dynamic registrations.
---- This function abstracts over differences between capabilities declared in `server_capabilities`
---- and those registered dynamically at runtime, returning all matching capability values.
---- It also handles cases where the registration method differs from the calling method by abstracting to the Provider.
---- For example, `workspace/diagnostic` uses capabilities registered under `textDocument/diagnostic`.
---- This is useful for features like diagnostics and formatting, where servers may register multiple providers
---- with different options (such as specific filetypes or document selectors).
---- @param method vim.lsp.protocol.Method.ClientToServer | vim.lsp.protocol.Method.Registration LSP method name
---- @param ... any Additional keys to index into the capability
---- @return lsp.LSPAny[] # The capability value if it exists, empty table if not found
-function Client:_provider_value_get(method, ...)
-  local matched_regs = {} --- @type any[]
+--- Executes callback fn for all registrations for a given LSP method.
+---
+--- This handles both static capabilities (declared in server_capabilities during
+--- initialization) and dynamic registrations (registered at runtime via
+--- `client/registerCapability`).
+---
+--- Some methods may have multiple registrations (e.g., different documentSelectors
+--- or configurations). The callback is invoked once for each registration.
+---
+--- Example: Getting diagnostic identifiers from all registrations
+---     client:_provider_foreach('textDocument/diagnostic', function(cap)
+---       print(cap.identifier)  -- "static-id", "dynamic-id-1", "dynamic-id-2"
+---     end)
+---
+--- Note: Some capabilities alias to different providers. For example,
+--- `workspace/diagnostic` uses the same `diagnosticProvider` as `textDocument/diagnostic`.
+---
+---@param method vim.lsp.protocol.Method.ClientToServer | vim.lsp.protocol.Method.Registration LSP method name
+---@param fn fun(capability_value: lsp.LSPAny) Callback invoked for each matching capability
+function Client:_provider_foreach(method, fn)
   local provider = self:_registration_provider(method)
+  local required_capability = lsp.protocol._request_name_to_server_capability[method]
   local dynamic_regs = self:_get_registrations(provider)
+  local has_subcap = required_capability and #required_capability > 1
   if not provider then
-    return matched_regs
+    return
   elseif not dynamic_regs then
     -- First check static capabilities
     local static_reg = vim.tbl_get(self.server_capabilities, provider)
     if static_reg then
-      matched_regs[1] = vim.tbl_get(static_reg, ...) or vim.NIL
+      if not has_subcap or vim.tbl_get(static_reg, unpack(required_capability, 2)) then
+        fn(static_reg)
+      end
     end
   else
-    local required_capability = lsp.protocol._request_name_to_server_capability[method]
     for _, reg in ipairs(dynamic_regs) do
-      if vim.tbl_get(reg, 'registerOptions', unpack(required_capability, 2)) then
-        matched_regs[#matched_regs + 1] = vim.tbl_get(reg, 'registerOptions', ...) or vim.NIL
+      if not has_subcap or vim.tbl_get(reg, 'registerOptions', unpack(required_capability, 2)) then
+        fn(vim.tbl_get(reg, 'registerOptions') or {})
       end
     end
   end
-
-  return matched_regs
 end
 
 --- @private
@@ -1373,7 +1376,7 @@ local function reset_defaults(bufnr)
   vim._with({ buf = bufnr }, function()
     local keymap = vim.fn.maparg('K', 'n', false, true)
     if keymap and keymap.callback == lsp.buf.hover and keymap.buffer == 1 then
-      vim.keymap.del('n', 'K', { buffer = bufnr })
+      vim.keymap.del('n', 'K', { buf = bufnr })
     end
   end)
 end

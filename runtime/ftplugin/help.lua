@@ -57,16 +57,16 @@ end
 
 vim.keymap.set('n', 'gO', function()
   require('vim.treesitter._headings').show_toc()
-end, { buffer = 0, silent = true, desc = 'Show an Outline of the current buffer' })
+end, { buf = 0, silent = true, desc = 'Show an Outline of the current buffer' })
 
 vim.keymap.set('n', ']]', function()
   require('vim.treesitter._headings').jump({ count = 1 })
-end, { buffer = 0, silent = false, desc = 'Jump to next section' })
+end, { buf = 0, silent = false, desc = 'Jump to next section' })
 vim.keymap.set('n', '[[', function()
   require('vim.treesitter._headings').jump({ count = -1 })
-end, { buffer = 0, silent = false, desc = 'Jump to previous section' })
+end, { buf = 0, silent = false, desc = 'Jump to previous section' })
 
-local parser = assert(vim.treesitter.get_parser(0, 'vimdoc', { error = false }))
+local parser = assert(vim.treesitter.get_parser(0, 'vimdoc'))
 
 local function runnables()
   ---@type table<integer, { lang: string, code: string }>
@@ -111,7 +111,7 @@ local function runnables()
     elseif code_block.lang == 'vim' then
       vim.cmd(code_block.code)
     end
-  end, { buffer = true })
+  end, { buf = true })
 end
 
 -- Retry once if the buffer has changed during the iteration of the code
@@ -125,7 +125,7 @@ local function urls()
   local filepath = vim.fs.normalize(vim.api.nvim_buf_get_name(0))
 
   if vim.fs.relpath(vim.env.VIMRUNTIME, filepath) ~= nil then
-    local base = 'https://neovim.io/doc/user/helptag.html?tag='
+    local base = 'https://neovim.io/doc/user/helptag/?tag='
     local query = vim.treesitter.query.parse(
       'vimdoc',
       [[

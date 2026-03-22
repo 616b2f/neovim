@@ -337,13 +337,14 @@ static void tui_reset_key_encoding(TUIData *tui)
   }
 }
 
-/// Write the OSC 11 sequence to the terminal emulator to query the current background color.
+/// Write the OSC 11 + DSR sequence to the terminal emulator to query the current
+/// background color.
 ///
 /// Response will be handled by the TermResponse handler in _core/defaults.lua.
 void tui_query_bg_color(TUIData *tui)
   FUNC_ATTR_NONNULL_ALL
 {
-  out(tui, S_LEN("\x1b]11;?\x07"));
+  out(tui, S_LEN("\x1b]11;?\x07\x1b[5n"));
   flush_buf(tui);
 }
 
@@ -752,6 +753,10 @@ static void update_attrs(TUIData *tui, int attr_id)
   bool standout = attr & HL_STANDOUT;
   bool strikethrough = attr & HL_STRIKETHROUGH;
   bool altfont = attr & HL_ALTFONT;
+  bool dim = attr & HL_DIM;
+  bool blink = attr & HL_BLINK;
+  bool conceal = attr & HL_CONCEALED;
+  bool overline = attr & HL_OVERLINE;
 
   bool underline;
   bool undercurl;
@@ -777,13 +782,13 @@ static void update_attrs(TUIData *tui, int attr_id)
                            || underdouble || underdotted || underdashed;
 
   if (tui->ti.defs[kTerm_set_attributes] != NULL) {
-    if (bold || reverse || underline || standout) {
+    if (bold || dim || blink || reverse || underline || standout) {
       TPVAR params[9] = { 0 };
       params[0].num = standout;
       params[1].num = underline;
       params[2].num = reverse;
-      params[3].num = 0;   // blink
-      params[4].num = 0;   // dim
+      params[3].num = blink;
+      params[4].num = dim;
       params[5].num = bold;
       params[6].num = 0;   // blank
       params[7].num = 0;   // protect
@@ -808,6 +813,12 @@ static void update_attrs(TUIData *tui, int attr_id)
     if (reverse) {
       terminfo_out(tui, kTerm_enter_reverse_mode);
     }
+    if (dim) {
+      terminfo_out(tui, kTerm_enter_dim_mode);
+    }
+    if (blink) {
+      terminfo_out(tui, kTerm_enter_blink_mode);
+    }
   }
   if (italic) {
     terminfo_out(tui, kTerm_enter_italics_mode);
@@ -817,6 +828,12 @@ static void update_attrs(TUIData *tui, int attr_id)
   }
   if (strikethrough) {
     terminfo_out(tui, kTerm_enter_strikethrough_mode);
+  }
+  if (conceal) {
+    terminfo_out(tui, kTerm_enter_secure_mode);
+  }
+  if (overline) {
+    out(tui, S_LEN("\x1b[53m"));
   }
   if (tui->ti.defs[kTerm_set_underline_style]) {
     if (undercurl) {
@@ -898,14 +915,14 @@ static void update_attrs(TUIData *tui, int attr_id)
   }
 
   tui->default_attr = fg == -1 && bg == -1
-                      && !bold && !italic && !has_any_underline && !reverse && !standout
-                      && !strikethrough;
+                      && !bold && !dim && !blink && !conceal && !overline && !italic
+                      && !has_any_underline && !reverse && !standout && !strikethrough;
 
   // Non-BCE terminals can't clear with non-default background color. Some BCE
   // terminals don't support attributes either, so don't rely on it. But assume
   // italic and bold has no effect if there is no text.
-  tui->can_clear_attr = !reverse && !standout && !has_any_underline
-                        && !strikethrough && (tui->bce || bg == -1);
+  tui->can_clear_attr = !reverse && !standout && !dim && !blink && !conceal && !overline
+                        && !has_any_underline && !strikethrough && (tui->bce || bg == -1);
 }
 
 static void final_column_wrap(TUIData *tui)
@@ -1256,6 +1273,17 @@ static CursorShape tui_cursor_decode_shape(const char *shape_str)
   return shape;
 }
 
+/// Reset terminal cursor style. This may be different across terminals and
+/// terminal configs. Also, it depends on what escape sequence Unibilium or
+/// terminfo_builtin.h have set for kTerm_reset_cursor_style (which can also
+/// depend on other runtime logic). It doesn't necessarily send out a
+/// `\x1b[0 q` (terminal default) sequence.
+/// See https://ghostty.org/docs/vt/csi/decscusr for more details.
+static void tui_cursor_reset_style(TUIData *tui)
+{
+  terminfo_out(tui, kTerm_reset_cursor_style);
+}
+
 static cursorentry_T decode_cursor_entry(Dict args)
 {
   cursorentry_T r = shape_table[0];
@@ -1281,7 +1309,8 @@ void tui_mode_info_set(TUIData *tui, bool guicursor_enabled, Array args)
 {
   cursor_style_enabled = guicursor_enabled;
   if (!guicursor_enabled) {
-    return;  // Do not send cursor style control codes.
+    tui_cursor_reset_style(tui);
+    return;
   }
 
   assert(args.size);
@@ -1338,6 +1367,7 @@ void tui_mouse_off(TUIData *tui)
 static void tui_set_mode(TUIData *tui, ModeShape mode)
 {
   if (!cursor_style_enabled) {
+    tui_cursor_reset_style(tui);
     return;
   }
   cursorentry_T c = tui->cursor_shapes[mode];

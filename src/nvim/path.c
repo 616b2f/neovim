@@ -1775,10 +1775,10 @@ int path_is_url(const char *p)
   return 0;
 }
 
-/// Check if "fname" starts with "name://" or "name:\\".
+/// Check if "fname" starts with "name:/" or "name:\".
 ///
 /// @param  fname         is the filename to test
-/// @return URL_SLASH for "name://", URL_BACKSLASH for "name:\\", zero otherwise.
+/// @return URL_SLASH for "name:/", URL_BACKSLASH for "name:\", zero otherwise.
 int path_with_url(const char *fname)
   FUNC_ATTR_NONNULL_ALL
 {
@@ -2121,7 +2121,10 @@ char *path_shorten_fname(char *full_path, char *dir_name)
     return NULL;
   }
 
-  return p + 1;
+  do {
+    p++;
+  } while (vim_ispathsep_nocolon(*p));
+  return p;
 }
 
 /// Invoke expand_wildcards() for one pattern
@@ -2377,20 +2380,23 @@ static int path_to_absolute(const char *fname, char *buf, size_t len, int force)
     if (p == NULL) {
       p = strrchr(fname, '\\');
     }
+    if (p == NULL && ASCII_ISALPHA(fname[0]) && fname[1] == ':') {  // drive letter
+      p = fname + 1;
+    }
 #endif
     if (p == NULL && strcmp(fname, "..") == 0) {
       // Handle ".." without path separators.
       p = fname + 2;
     }
     if (p != NULL) {
-      if (vim_ispathsep_nocolon(*p) && strcmp(p + 1, "..") == 0) {
+      if (vim_ispathsep(*p) && strcmp(p + 1, "..") == 0) {
         // For "/path/dir/.." include the "/..".
         p += 3;
       }
       assert(p >= fname);
       memcpy(relative_directory, fname, (size_t)(p - fname + 1));
       relative_directory[p - fname + 1] = NUL;
-      end_of_path = (vim_ispathsep_nocolon(*p) ? p + 1 : p);
+      end_of_path = (vim_ispathsep(*p) ? p + 1 : p);
     } else {
       relative_directory[0] = NUL;
     }

@@ -116,21 +116,30 @@ end
 
 --- Concatenates partial paths (one absolute or relative path followed by zero or more relative
 --- paths). Slashes are normalized: redundant slashes are removed, and (on Windows) backslashes are
---- replaced with forward-slashes. Paths are not expanded/resolved.
+--- replaced with forward-slashes. Empty segments are removed. Paths are not expanded/resolved.
 ---
 --- Examples:
 --- - "foo/", "/bar" => "foo/bar"
+--- - "", "after/plugin" => "after/plugin"
 --- - Windows: "a\foo\", "\bar" => "a/foo/bar"
 ---
 ---@since 12
 ---@param ... string
 ---@return string
 function M.joinpath(...)
-  local path = table.concat({ ... }, '/')
-  if iswin then
-    path = path:gsub('\\', '/')
+  local n = select('#', ...)
+  ---@type string[]
+  local segments = {}
+  for i = 1, n do
+    local s = select(i, ...)
+    if s and #s > 0 then
+      segments[#segments + 1] = s
+    end
   end
-  return (path:gsub('//+', '/'))
+
+  local path = table.concat(segments, '/')
+
+  return (path:gsub(iswin and '[/\\][/\\]*' or '//+', '/'))
 end
 
 --- @class vim.fs.dir.Opts
@@ -400,7 +409,7 @@ end
 ---
 --- -- Find the parent directory containing any file with a .csproj extension
 --- vim.fs.root(0, function(name, path)
----   return name:match('%.csproj$') ~= nil
+---   return vim.fs.ext(name) == 'csproj'
 --- end)
 ---
 --- -- Find the first ancestor directory containing EITHER "stylua.toml" or ".luarc.json"; if
@@ -781,8 +790,7 @@ function M.abspath(path)
 
   -- Windows allows paths like C:foo/bar, these paths are relative to the current working directory
   -- of the drive specified in the path
-  local cwd = (iswin and prefix:match('^%w:$')) and uv.fs_realpath(prefix) or uv.cwd()
-  assert(cwd ~= nil)
+  local cwd = assert((iswin and prefix:match('^%w:$')) and uv.fs_realpath(prefix) or uv.cwd())
   -- Convert cwd path separator to `/`
   cwd = cwd:gsub(os_sep, '/')
 
@@ -825,6 +833,29 @@ function M.relpath(base, target, opts)
   base = prefix .. base .. (base ~= '/' and '/' or '')
 
   return vim.startswith(target, base) and target:sub(#base + 1) or nil
+end
+
+--- Return the file's last extension, if any.
+---
+--- Similar to |fnamemodify()| with the |::e| modifier. The extension does not include a leading
+--- period.
+---
+--- Examples:
+---
+--- ```lua
+--- vim.fs.ext('archive.tar.gz') -- 'gz'
+--- vim.fs.ext('~/.git') -- ''
+--- vim.fs.ext('plugin/myplug.lua') -- 'lua'
+--- ```
+---
+---@since 14
+---@param file string Path
+---@param opts table? Reserved for future use
+---@return string Extension of {file}
+function M.ext(file, opts)
+  vim.validate('file', file, 'string')
+  vim.validate('opts', opts, 'table', true)
+  return vim.fn.fnamemodify(file, ':e')
 end
 
 return M

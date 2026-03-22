@@ -182,6 +182,7 @@ bool channel_close(uint64_t id, ChannelPart part, const char **error)
       chan->stream.internal.cb = LUA_NOREF;
       chan->stream.internal.closed = true;
       terminal_close(&chan->term, 0);
+      chan->exit_status = 0;
     } else {
       channel_decref(chan);
     }
@@ -407,6 +408,14 @@ Channel *channel_job_start(char **argv, const char *exepath, CallbackReader on_s
     has_out = rpc || callback_reader_set(chan->on_data);
     has_err = callback_reader_set(chan->on_stderr);
     proc->fwd_err = chan->on_stderr.fwd_err;
+#ifdef MSWIN
+    // DETACHED_PROCESS can't inherit console handles (like ConPTY stderr).
+    // Use a pipe relay: libuv creates a pipe, on_channel_output writes to stderr.
+    if (!has_err && proc->fwd_err && proc->detach) {
+      has_err = true;
+      proc->fwd_err = false;
+    }
+#endif
   }
 
   bool has_in = stdin_mode == kChannelStdinPipe;
@@ -536,8 +545,18 @@ uint64_t channel_from_stdio(bool rpc, CallbackReader on_output, const char **err
   // stdin and stdout with CONIN$ and CONOUT$, respectively.
   if (embedded_mode && os_has_conpty_working()) {
     stdin_dup_fd = os_dup(STDIN_FILENO);
-    os_replace_stdin_to_conin();
+    os_set_cloexec(stdin_dup_fd);
     stdout_dup_fd = os_dup(STDOUT_FILENO);
+    os_set_cloexec(stdout_dup_fd);
+
+    // The server may have no console (spawned with UV_PROCESS_DETACHED for
+    // :detach support). Allocate a hidden one so CONIN$/CONOUT$ and ConPTY
+    // (:terminal) work.
+    if (!GetConsoleWindow()) {
+      AllocConsole();
+      ShowWindow(GetConsoleWindow(), SW_HIDE);
+    }
+    os_replace_stdin_to_conin();
     os_replace_stdout_and_stderr_to_conout();
   }
 #else
@@ -617,7 +636,7 @@ size_t channel_send(uint64_t id, char *data, size_t len, bool data_owned, const 
   // write can be delayed indefinitely, so always use an allocated buffer
   WBuffer *buf = wstream_new_buffer(data_owned ? data : xmemdup(data, len),
                                     len, 1, xfree);
-  return wstream_write(in, buf) ? len : 0;
+  return wstream_write(in, buf) == 0 ? len : 0;
 
 retfree:
   if (data_owned) {
@@ -667,6 +686,17 @@ static size_t on_channel_output(RStream *stream, Channel *chan, const char *buf,
   if (eof) {
     reader->eof = true;
   }
+
+#ifdef MSWIN
+  // Pipe relay for fwd_err on Windows: relay server stderr to stdout.
+  // DETACHED_PROCESS prevents inheriting console handles, so channel_job_start
+  // creates a pipe instead. Write to stdout because ConPTY only captures stdout.
+  // On non-Windows, fwd_err uses UV_INHERIT_FD directly; this path is never reached.
+  if (reader->fwd_err && count > 0) {
+    ptrdiff_t wres = os_write(STDOUT_FILENO, buf, count, false);
+    return (size_t)MAX(wres, 0);
+  }
+#endif
 
   if (callback_reader_set(*reader)) {
     ga_concat_len(&reader->buffer, buf, count);
@@ -755,8 +785,8 @@ static void channel_proc_exit_cb(Proc *proc, int status, void *data)
   bool exited = (status >= 0);
   if (exited && chan->on_exit.type != kCallbackNone) {
     schedule_channel_event(chan);
-    chan->exit_status = status;
   }
+  chan->exit_status = exited ? status : chan->exit_status;
 
   channel_decref(chan);
 }
@@ -817,6 +847,7 @@ void channel_terminal_alloc(buf_T *buf, Channel *chan)
     .data = chan,
     .width = chan->stream.pty.width,
     .height = chan->stream.pty.height,
+    .read_pause_cb = term_read_pause,
     .write_cb = term_write,
     .resize_cb = term_resize,
     .resume_cb = term_resume,
@@ -826,6 +857,19 @@ void channel_terminal_alloc(buf_T *buf, Channel *chan)
   buf->b_p_channel = (OptInt)chan->id;  // 'channel' option
   channel_incref(chan);
   chan->term = terminal_alloc(buf, topts);
+}
+
+static void term_read_pause(bool pause, void *data)
+{
+  Channel *chan = data;
+  if (chan->stream.proc.out.s.closed) {
+    return;
+  }
+  if (pause) {
+    rstream_stop_inner(&chan->stream.proc.out);
+  } else {
+    rstream_start_inner(&chan->stream.proc.out);
+  }
 }
 
 static void term_write(const char *buf, size_t size, void *data)
@@ -849,10 +893,8 @@ static void term_resize(uint16_t width, uint16_t height, void *data)
 
 static void term_resume(void *data)
 {
-#ifdef UNIX
   Channel *chan = data;
   pty_proc_resume(&chan->stream.pty);
-#endif
 }
 
 static inline void term_delayed_free(void **argv)
@@ -974,6 +1016,7 @@ Dict channel_info(uint64_t id, Arena *arena)
   } else if (chan->term) {
     mode_desc = "terminal";
     PUT_C(info, "buffer", BUFFER_OBJ(terminal_buf(chan->term)));
+    PUT_C(info, "exitcode", INTEGER_OBJ(chan->exit_status));
   } else {
     mode_desc = "bytes";
   }

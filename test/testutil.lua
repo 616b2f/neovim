@@ -73,8 +73,8 @@ end
 --- @param fn function
 --- @return any
 function M.retry(max, max_ms, fn)
-  luaassert(max == nil or max > 0)
-  luaassert(max_ms == nil or max_ms > 0)
+  assert(max == nil or max > 0)
+  assert(max_ms == nil or max_ms > 0)
   local tries = 1
   local timeout = (max_ms and max_ms or 10000)
   local start_time = uv.now()
@@ -106,18 +106,23 @@ function M.neq(expected, actual, context)
   return luaassert.are_not.same(expected, actual, context)
 end
 
+--- Compare paths after resolving symlinks with realpath.
+function M.eq_paths(expected, actual, context)
+  return M.eq(uv.fs_realpath(expected), uv.fs_realpath(actual), context)
+end
+
 --- Asserts that `cond` is true, or prints a message.
 ---
 --- @param cond (boolean) expression to assert
 --- @param expected (any) description of expected result
 --- @param actual (any) description of actual result
 function M.ok(cond, expected, actual)
-  luaassert(
+  assert(
     (not expected and not actual) or (expected and actual),
     'if "expected" is given, "actual" is also required'
   )
   local msg = expected and ('expected %s, got: %s'):format(expected, tostring(actual)) or nil
-  return luaassert(cond, msg)
+  return assert(cond, msg)
 end
 
 local function epicfail(state, arguments, _)
@@ -151,8 +156,8 @@ end
 ---@param nrlines? (number) Search up to this many log lines (default 10)
 ---@param inverse? (boolean) Assert that the pattern does NOT match.
 function M.assert_log(pat, logfile, nrlines, inverse)
-  logfile = logfile or os.getenv('NVIM_LOG_FILE') or '.nvimlog'
-  luaassert(logfile ~= nil, 'no logfile')
+  logfile = logfile or os.getenv('NVIM_LOG_FILE') or 'nvim.log'
+  assert(logfile ~= nil, 'no logfile')
   nrlines = nrlines or 10
 
   M.retry(nil, 1000, function()
@@ -161,7 +166,7 @@ function M.assert_log(pat, logfile, nrlines, inverse)
     local ismatch = not not text:match(pat)
     if (ismatch and inverse) or not (ismatch or inverse) then
       local msg = string.format(
-        'Pattern %s %sfound in log (last %d lines): %s:\n%s',
+        'Pattern %s %sfound in log (last %d lines): %q:\n%s',
         vim.inspect(pat),
         (inverse and '' or 'not '),
         nrlines,
@@ -187,7 +192,7 @@ end
 --- @param ... any
 --- @return boolean, any
 function M.pcall(fn, ...)
-  luaassert(type(fn) == 'function')
+  assert(type(fn) == 'function')
   local status, rv = pcall(fn, ...)
   if status then
     return status, rv
@@ -236,7 +241,7 @@ end
 --- @param fn function
 --- @return string
 function M.pcall_err_withfile(fn, ...)
-  luaassert(type(fn) == 'function')
+  assert(type(fn) == 'function')
   local status, rv = M.pcall(fn, ...)
   if status == true then
     error('expected failure, but got success')
@@ -785,7 +790,7 @@ end
 --- @return boolean
 function M.is_ci(name)
   local any = (name == nil)
-  luaassert(any or name == 'github' or name == 'cirrus')
+  assert(any or name == 'github' or name == 'cirrus')
   local gh = ((any or name == 'github') and nil ~= os.getenv('GITHUB_ACTIONS'))
   local cirrus = ((any or name == 'cirrus') and nil ~= os.getenv('CIRRUS_CI'))
   return gh or cirrus
@@ -794,7 +799,8 @@ end
 -- Gets the (tail) contents of `logfile`.
 -- Also moves the file to "${NVIM_LOG_FILE}.displayed" on CI environments.
 function M.read_nvim_log(logfile, ci_rename)
-  logfile = logfile or os.getenv('NVIM_LOG_FILE') or '.nvimlog'
+  logfile = logfile or os.getenv('NVIM_LOG_FILE') or 'nvim.log'
+  assert(uv.fs_stat(logfile), ('logfile not found: %q'):format(logfile))
   local is_ci = M.is_ci()
   local keep = is_ci and 100 or 10
   local lines = M.read_file_list(logfile, -keep) or {}

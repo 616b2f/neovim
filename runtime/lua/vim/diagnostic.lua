@@ -92,7 +92,7 @@ end
 --- @field signs? boolean|vim.diagnostic.Opts.Signs|fun(namespace: integer, bufnr:integer): vim.diagnostic.Opts.Signs
 ---
 --- Options for floating windows. See |vim.diagnostic.Opts.Float|.
---- @field float? boolean|vim.diagnostic.Opts.Float|fun(namespace: integer, bufnr:integer): vim.diagnostic.Opts.Float
+--- @field float? boolean|vim.diagnostic.Opts.Float|fun(namespace?: integer|integer[], bufnr:integer): vim.diagnostic.Opts.Float
 ---
 --- Options for the statusline component.
 --- @field status? vim.diagnostic.Opts.Status
@@ -189,8 +189,37 @@ end
 
 --- @class vim.diagnostic.Opts.Status
 ---
---- A table mapping |diagnostic-severity| to the text to use for each severity section.
---- @field text? table<vim.diagnostic.Severity,string>
+--- Either:
+--- - a table mapping |diagnostic-severity| to the text to use for each
+---   existing severity section.
+--- - a function that accepts a mapping of |diagnostic-severity| to the
+---   number of diagnostics of the corresponding severity (only those
+---   severity levels that have at least 1 diagnostic) and returns
+---   a 'statusline' component. In this case highlights must be applied
+---   by the user in the `format` function. Example:
+---   ```lua
+---   local signs = {
+---     [vim.diagnostic.severity.ERROR] = "A",
+---     -- ...
+---   }
+---   local hl_map = {
+---     [vim.diagnostic.severity.ERROR] = 'DiagnosticSignError',
+---     -- ...
+---   }
+---   vim.diagnostic.config({
+---     status = {
+---       format = function(counts)
+---         local items = {}
+---         for level, _ in ipairs(vim.diagnostic.severity) do
+---           local count = counts[level] or 0
+---           table.insert(items, ("%%#%s#%s %s"):format(hl_map[level], signs[level], count))
+---         end
+---         return table.concat(items, " ")
+---       end
+---     }
+---   })
+---   ```
+--- @field format? table<vim.diagnostic.Severity,string>|(fun(counts:table<vim.diagnostic.Severity,integer>): string)
 
 --- @class vim.diagnostic.Opts.Underline
 ---
@@ -666,7 +695,9 @@ local function get_logical_pos(diagnostic)
     diagnostic._extmark_id,
     { details = true }
   )
-
+  if next(extmark) == nil then
+    return diagnostic.lnum, diagnostic.col, diagnostic.end_lnum, diagnostic.end_col, true
+  end
   return extmark[1], extmark[2], extmark[3].end_row, extmark[3].end_col, not extmark[3].invalid
 end
 
@@ -2408,10 +2439,13 @@ function M.open_float(opts, ...)
     -- Resolve options with user settings from vim.diagnostic.config
     -- Unlike the other decoration functions (e.g. set_virtual_text, set_signs, etc.) `open_float`
     -- does not have a dedicated table for configuration options; instead, the options are mixed in
-    -- with its `opts` table which also includes "keyword" parameters. So we create a dedicated
-    -- options table that inherits missing keys from the global configuration before resolving.
-    local t = global_diagnostic_options.float
-    local float_opts = vim.tbl_extend('keep', opts, type(t) == 'table' and t or {})
+    -- with its `opts` table. We create a dedicated options table (`float_opts`) that inherits
+    -- missing keys from the global configuration (`global_diagnostic_options.float`), which can
+    -- be a table or a function.
+    local o = global_diagnostic_options
+    local t = type(o.float) == 'table' and o.float
+      or (type(o.float) == 'function' and o.float(opts.namespace, bufnr) or {})
+    local float_opts = vim.tbl_extend('keep', opts, t)
     opts = get_resolved_options({ float = float_opts }, nil, bufnr).float
   end
 
@@ -2627,7 +2661,7 @@ function M.open_float(opts, ...)
     else
       vim.cmd.normal({ 'gf', bang = true })
     end
-  end, { buffer = float_bufnr, remap = false })
+  end, { buf = float_bufnr, remap = false })
 
   --- @diagnostic disable-next-line: deprecated
   local add_highlight = api.nvim_buf_add_highlight
@@ -2855,7 +2889,7 @@ function M.match(str, pat, groups, severity_map, defaults)
     if field == 'severity' then
       diagnostic[field] = severity_map[match]
     elseif field == 'lnum' or field == 'end_lnum' or field == 'col' or field == 'end_col' then
-      diagnostic[field] = assert(tonumber(match)) - 1
+      diagnostic[field] = vim._assert_integer(match) - 1
     elseif field then
       diagnostic[field] = match
     end
@@ -2967,17 +3001,19 @@ local hl_map = {
   [M.severity.INFO] = 'DiagnosticSignInfo',
   [M.severity.HINT] = 'DiagnosticSignHint',
 }
+local default_status_signs = {
+  [M.severity.ERROR] = 'E',
+  [M.severity.WARN] = 'W',
+  [M.severity.INFO] = 'I',
+  [M.severity.HINT] = 'H',
+}
 
 --- Returns formatted string with diagnostics for the current buffer.
 --- The severities with 0 diagnostics are left out.
 --- Example `E:2 W:3 I:4 H:5`
 ---
---- To customise appearance, set diagnostic text for each severity with
---- ```lua
---- vim.diagnostic.config({
----   status = { text = { [vim.diagnostic.severity.ERROR] = 'e', ... } }
---- })
---- ```
+--- To customise appearance, see |vim.diagnostic.Opts.Status|.
+---
 ---@param bufnr? integer Buffer number to get diagnostics from.
 ---                      Defaults to 0 for the current buffer
 ---
@@ -2985,20 +3021,26 @@ local hl_map = {
 function M.status(bufnr)
   vim.validate('bufnr', bufnr, 'number', true)
   bufnr = bufnr or 0
+  local config = assert(M.config()).status or {}
+  vim.validate('config.format', config.format, { 'table', 'function' }, true)
   local counts = M.count(bufnr)
-  local user_signs = vim.tbl_get(M.config() --[[@as vim.diagnostic.Opts]], 'status', 'text') or {}
-  local signs = vim.tbl_extend('keep', user_signs, { 'E', 'W', 'I', 'H' })
-  local result_str = vim
-    .iter(pairs(counts))
-    :map(function(severity, count)
-      return ('%%#%s#%s:%s'):format(hl_map[severity], signs[severity], count)
-    end)
-    :join(' ')
-
+  local format = config.format or default_status_signs
+  --- @type string
+  local result_str
+  if type(format) == 'table' then
+    local signs = vim.tbl_extend('keep', format, default_status_signs)
+    result_str = vim
+      .iter(pairs(counts))
+      :map(function(severity, count)
+        return ('%%#%s#%s:%s'):format(hl_map[severity], signs[severity], count)
+      end)
+      :join(' ')
+  elseif type(format) == 'function' then
+    result_str = format(counts)
+  end
   if result_str:len() > 0 then
     result_str = result_str .. '%##'
   end
-
   return result_str
 end
 

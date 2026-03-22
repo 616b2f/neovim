@@ -887,12 +887,12 @@ void nlua_init(char **argv, int argc, int lua_arg0)
 
   lua_State *lstate = luaL_newstate();
   if (lstate == NULL) {
-    fprintf(stderr, _("E970: Failed to initialize lua interpreter\n"));
+    fprintf(stderr, _("E970: Failed to initialize Lua interpreter\n"));
     os_exit(1);
   }
   luaL_openlibs(lstate);
   if (!nlua_state_init(lstate)) {
-    fprintf(stderr, _("E970: Failed to initialize builtin lua modules\n"));
+    fprintf(stderr, _("E970: Failed to initialize builtin Lua modules\n"));
 #ifdef EXITFREE
     nlua_common_free_all_mem(lstate);
 #endif
@@ -1013,7 +1013,7 @@ static void nlua_print_event(void **argv)
   HlMessageChunk chunk = { { .data = argv[0], .size = (size_t)(intptr_t)argv[1] - 1 }, 0 };
   kv_push(msg, chunk);
   bool needs_clear = false;
-  msg_multihl(INTEGER_OBJ(0), msg, "lua_print", true, false, NULL, &needs_clear);
+  msg_multihl(NIL, msg, "lua_print", true, false, NULL, &needs_clear);
 }
 
 /// Print as a Vim message
@@ -1161,14 +1161,25 @@ static int nlua_debug(lua_State *lstate)
     lua_settop(lstate, 0);
     typval_T input;
     get_user_input(input_args, &input, false, false);
-    msg_putchar('\n');  // Avoid outputting on input line.
+
+    if (ui_has(kUICmdline)) {
+      snprintf(IObuff, IOSIZE, "lua_debug> %s", input.vval.v_string);
+      ui_ext_cmdline_block_append(0, IObuff);
+    } else {
+      msg_putchar('\n');  // Avoid outputting on input line.
+    }
+
     if (input.v_type != VAR_STRING
         || input.vval.v_string == NULL
         || *input.vval.v_string == NUL
         || strcmp(input.vval.v_string, "cont") == 0) {
       tv_clear(&input);
+      if (ui_has(kUICmdline)) {
+        ui_ext_cmdline_block_leave();
+      }
       return 0;
     }
+
     if (luaL_loadbuffer(lstate, input.vval.v_string,
                         strlen(input.vval.v_string), "=(debug command)")) {
       nlua_error(lstate, _("E5115: Loading Lua debug string: %.*s"));

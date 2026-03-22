@@ -1783,7 +1783,8 @@ static const char *find_cmd_after_isearch_cmd(expand_T *xp, const char *arg)
 /// Set the completion context for the :unlet command. Always returns NULL.
 static const char *set_context_in_unlet_cmd(expand_T *xp, const char *arg)
 {
-  while ((xp->xp_pattern = strchr(arg, ' ')) != NULL) {
+  // NOLINTNEXTLINE(*-casting): remove once CI uses glibc 2.43
+  while ((xp->xp_pattern = (char *)strchr(arg, ' ')) != NULL) {
     arg = xp->xp_pattern + 1;
   }
 
@@ -2165,7 +2166,8 @@ static const char *set_context_by_cmdname(const char *cmd, cmdidx_T cmdidx, expa
   case CMD_bdelete:
   case CMD_bwipeout:
   case CMD_bunload:
-    while ((xp->xp_pattern = strchr(arg, ' ')) != NULL) {
+    // NOLINTNEXTLINE(*-casting): remove once CI uses glibc 2.43
+    while ((xp->xp_pattern = (char *)strchr(arg, ' ')) != NULL) {
       arg = xp->xp_pattern + 1;
     }
     FALLTHROUGH;
@@ -3084,9 +3086,9 @@ static int ExpandFromContext(expand_T *xp, char *pat, char ***matches, int *numM
   if (!fuzzy) {
     regmatch.regprog = vim_regcomp(pat, magic_isset() ? RE_MAGIC : 0);
     if (regmatch.regprog == NULL) {
+      xfree(tofree);
       return FAIL;
     }
-
     // set ignore-case according to p_ic, p_scs and pat
     regmatch.rm_ic = ignorecase(pat);
   }
@@ -4059,7 +4061,7 @@ static int copy_substring_from_pos(pos_T *start, pos_T *end, char **match, pos_T
   ga_concat_len(&ga, start_ptr, (size_t)segment_len);
   if (!is_single_line) {
     if (exacttext) {
-      ga_concat_len(&ga, S_LEN("\\n"));
+      GA_CONCAT_LITERAL(&ga, "\\n");
     } else {
       ga_append(&ga, '\n');
     }
@@ -4073,7 +4075,7 @@ static int copy_substring_from_pos(pos_T *start, pos_T *end, char **match, pos_T
       ga_grow(&ga, linelen + 2);
       ga_concat_len(&ga, line, (size_t)linelen);
       if (exacttext) {
-        ga_concat_len(&ga, S_LEN("\\n"));
+        GA_CONCAT_LITERAL(&ga, "\\n");
       } else {
         ga_append(&ga, '\n');
       }

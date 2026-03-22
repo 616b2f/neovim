@@ -54,9 +54,14 @@ local INDENTATION = 4
 --- @field helptag_fmt fun(name: string): string|string[]
 ---
 --- Per-function helptag.
---- @field fn_helptag_fmt? fun(fun: nvim.luacats.parser.fun): string
+--- @field fn_helptag_fmt? fun(fun: nvim.gen_vimdoc.HelptagTarget): string
 ---
 --- @field append_only? string[]
+
+---@alias nvim.gen_vimdoc.HelptagTarget
+---| nvim.luacats.parser.fun
+---| nvim.luacats.parser.field
+---| nvim.luacats.parser.param
 
 local function contains(t, xs)
   return vim.tbl_contains(xs, t)
@@ -84,13 +89,13 @@ local function nvim_api_info()
         prerelease = m2 == 'true'
       end
     end
-    nvim_api_info_ = { level = level, prerelease = prerelease }
+    nvim_api_info_ = { level = assert(level), prerelease = assert(prerelease) }
   end
 
   return nvim_api_info_
 end
 
---- @param fun nvim.luacats.parser.fun
+--- @param fun nvim.gen_vimdoc.HelptagTarget
 --- @return string
 local function fn_helptag_fmt_common(fun)
   local fn_sfx = fun.table and '' or '()'
@@ -235,7 +240,7 @@ local config = {
     end,
     section_name = {
       ['_inspector.lua'] = 'inspector',
-      ['ui2.lua'] = '_core.ui2',
+      ['ui2.lua'] = 'ui2',
     },
     section_fmt = function(name)
       name = name:lower()
@@ -247,6 +252,8 @@ local config = {
         return 'LUA-VIMSCRIPT BRIDGE'
       elseif name == 'builtin' then
         return 'VIM'
+      elseif name == 'ui2' then
+        return 'UI2'
       end
       return 'Lua module: vim.' .. name
     end,
@@ -257,6 +264,8 @@ local config = {
         return 'lua-vim-system'
       elseif name == 'Options' then
         return 'lua-vimscript'
+      elseif name == 'ui2' then
+        return 'ui2'
       end
       return 'vim.' .. name:lower()
     end,
@@ -503,6 +512,9 @@ local function should_render_field_or_param(p)
     and not vim.startswith(p.name, '_')
 end
 
+--- Gets a field's description and its "(default: …)" value, if any (see `lsp/client.lua` for
+--- examples).
+---
 --- @param desc? string
 --- @return string?, string?
 local function get_default(desc)
@@ -792,13 +804,18 @@ local function render_fun(fun, classes, cfg)
 
   if fun.since then
     local since = assert(tonumber(fun.since), 'invalid @since on ' .. fun.name)
-    local info = nvim_api_info()
-    if since == 0 or (info.prerelease and since == info.level) then
+    local nvim_api = nvim_api_info()
+    _ = nvim_api -- Disable prerelease "WARNING" doc, in preparation for for upcoming release.
+
+    if
+      since == 0 --[[or (nvim_api.prerelease and since == nvim_api.level)]]
+    then
       -- Experimental = (since==0 or current prerelease)
       local s = 'WARNING: This feature is experimental/unstable.'
       table.insert(ret, md_to_vimdoc(s, INDENTATION, INDENTATION, TEXT_WIDTH))
       table.insert(ret, '\n')
-    else
+    end
+    if since > 0 then
       local v = assert(util.version_level[since], 'invalid @since on ' .. fun.name)
       fun.attrs = fun.attrs or {}
       table.insert(fun.attrs, fmt('Since: %s', v))

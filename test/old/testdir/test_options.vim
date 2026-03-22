@@ -628,7 +628,9 @@ func Test_set_completion_string_values()
 
   call assert_equal('eol', getcompletion('set listchars+=', 'cmdline')[0])
   call assert_equal(['multispace', 'leadmultispace'], getcompletion('set listchars+=', 'cmdline')[-2:])
+  call assert_equal(['tab', 'leadtab'], getcompletion('set listchars+=', 'cmdline')[5:6])
   call assert_equal('eol', getcompletion('setl listchars+=', 'cmdline')[0])
+  call assert_equal(['tab', 'leadtab'], getcompletion('setl listchars+=', 'cmdline')[5:6])
   call assert_equal(['multispace', 'leadmultispace'], getcompletion('setl listchars+=', 'cmdline')[-2:])
   call assert_equal('stl', getcompletion('set fillchars+=', 'cmdline')[0])
   call assert_equal('stl', getcompletion('setl fillchars+=', 'cmdline')[0])
@@ -680,7 +682,7 @@ func Test_set_completion_string_values()
   " call assert_equal("\"set hl=8bi i", @:)
 
   " messagesopt
-  call assert_equal(['history:', 'hit-enter', 'wait:'],
+  call assert_equal(['history:', 'hit-enter', 'progress:', 'wait:'],
         \ getcompletion('set messagesopt+=', 'cmdline')->sort())
 
   "

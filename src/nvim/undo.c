@@ -382,7 +382,7 @@ int u_savecommon(buf_T *buf, linenr_T top, linenr_T bot, linenr_T newbot, bool r
   u_entry_T *prev_uep;
   linenr_T size = bot - top - 1;
 
-  // If curbuf->b_u_synced == true make a new header.
+  // If buf->b_u_synced == true make a new header.
   if (buf->b_u_synced) {
     // Need to create new entry in b_changelist.
     buf->b_new_change = true;
@@ -401,7 +401,7 @@ int u_savecommon(buf_T *buf, linenr_T top, linenr_T bot, linenr_T newbot, bool r
     }
 
     // If we undid more than we redid, move the entry lists before and
-    // including curbuf->b_u_curhead to an alternate branch.
+    // including buf->b_u_curhead to an alternate branch.
     u_header_T *old_curhead = buf->b_u_curhead;
     if (old_curhead != NULL) {
       buf->b_u_newhead = old_curhead->uh_next.ptr;
@@ -608,7 +608,7 @@ int u_savecommon(buf_T *buf, linenr_T top, linenr_T bot, linenr_T newbot, bool r
   buf->b_u_newhead->uh_entry = uep;
   if (reload) {
     // buffer was reloaded, notify text change subscribers
-    curbuf->b_u_newhead->uh_flags |= UH_RELOAD;
+    buf->b_u_newhead->uh_flags |= UH_RELOAD;
   }
   buf->b_u_synced = false;
   undo_undoes = false;
@@ -3090,6 +3090,8 @@ static char *u_save_line_buf(buf_T *buf, linenr_T lnum)
 /// Check if the 'modified' flag is set, or 'ff' has changed (only need to
 /// check the first character, because it can only be "dos", "unix" or "mac").
 /// "nofile" and "scratch" type buffers are considered to always be unchanged.
+/// Prompt buffers ignore implicit modifications by default, but an explicit
+/// ":set modified" still makes them count as changed.
 ///
 /// @param buf The buffer to check
 ///
@@ -3097,10 +3099,10 @@ static char *u_save_line_buf(buf_T *buf, linenr_T lnum)
 bool bufIsChanged(buf_T *buf)
   FUNC_ATTR_NONNULL_ALL FUNC_ATTR_WARN_UNUSED_RESULT
 {
-  // In a "prompt" buffer we do respect 'modified', so that we can control
-  // closing the window by setting or resetting that option.
-  return (!bt_dontwrite(buf) || bt_prompt(buf))
-         && (buf->b_changed || file_ff_differs(buf, true));
+  // In a "prompt" buffer we respect 'modified' if the user or a plugin explicitly set it.
+  return bt_prompt(buf)
+         ? buf->b_modified_was_set
+         : (!bt_dontwrite(buf) && (buf->b_changed || file_ff_differs(buf, true)));
 }
 
 // Return true if any buffer has changes.  Also buffers that are not written.

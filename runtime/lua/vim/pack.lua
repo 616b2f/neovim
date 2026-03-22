@@ -4,9 +4,9 @@
 --- experimental, yet should be stable enough for daily use.
 ---
 ---Manages plugins only in a dedicated [vim.pack-directory]() (see |packages|):
----`$XDG_DATA_HOME/nvim/site/pack/core/opt`. `$XDG_DATA_HOME/nvim/site` needs to
----be part of 'packpath'. It usually is, but might not be in cases like |--clean| or
----setting |$XDG_DATA_HOME| during startup.
+---`site/pack/core/opt` subdirectory of "data" |standard-path|. Subdirectory `site` of "data"
+---standard path needs to be part of 'packpath'. It usually is, but might not be
+---in cases like |--clean| or setting |$XDG_DATA_HOME| during startup.
 ---Plugin's subdirectory name matches plugin's name in specification.
 ---It is assumed that all plugins in the directory are managed exclusively by `vim.pack`.
 ---
@@ -123,7 +123,7 @@
 ---
 ---- Revert the |vim.pack-lockfile| to the state before the update:
 ---    - If Git tracked: `git checkout HEAD -- nvim-pack-lock.json`
----    - If not tracked: examine log file ("nvim-pack.log" at "log" |stdpath()|),
+---    - If not tracked: examine log file ("nvim-pack.log" at "log" |standard-path|),
 ---      locate the revisions before the latest update, and (carefully) adjust
 ---      current lockfile to have those revisions.
 ---- |:restart|.
@@ -843,7 +843,10 @@ end
 --- - Install plugins that have proper lockfile data but are not on disk.
 --- - Repair corrupted lock data for installed plugins.
 --- - Remove unrepairable corrupted lock data and plugins.
-local function lock_sync(confirm)
+--- @param confirm boolean
+--- @param specs vim.pack.Spec[] Plugin specs provided by the user. Can contain
+--- fields outside of what is in the lockfile to be passed down to events.
+local function lock_sync(confirm, specs)
   if type(plugin_lock.plugins) ~= 'table' then
     plugin_lock.plugins = {}
   end
@@ -885,7 +888,22 @@ local function lock_sync(confirm)
       local t = installed[name] == 'directory' and to_repair or to_remove
       t[#t + 1] = name
     elseif not installed[name] then
-      local spec = { src = data.src, name = name, version = data.version }
+      local spec ---@type vim.pack.Spec
+      -- Try reusing spec from user's `vim.pack.add()` (matters for events)
+      -- Delay until this point when shaving milliseconds shouldn't matter much
+      for _, s in ipairs(specs) do
+        local ok, s_norm = pcall(normalize_spec, s)
+        if ok and s_norm.name == name then
+          spec = vim.deepcopy(s_norm)
+        end
+      end
+
+      -- Force fields relevant to actual installation, try to preserve others
+      spec = spec or {}
+      spec.src = data.src
+      spec.name = name
+      spec.version = spec.version or data.version
+
       to_install[#to_install + 1] = new_plug(spec, plug_dir)
     end
   end
@@ -917,7 +935,7 @@ local function lock_sync(confirm)
   end
 end
 
-local function lock_read(confirm)
+local function lock_read(confirm, specs)
   if plugin_lock then
     return
   end
@@ -932,7 +950,7 @@ local function lock_read(confirm)
     plugin_lock = { plugins = {} }
   end
 
-  lock_sync(vim.F.if_nil(confirm, true))
+  lock_sync(vim.F.if_nil(confirm, true), vim.F.if_nil(specs, {}))
 end
 
 --- @class vim.pack.keyset.add
@@ -973,7 +991,7 @@ function M.add(specs, opts)
   opts = vim.tbl_extend('force', { load = vim.v.vim_did_init == 1, confirm = true }, opts or {})
   vim.validate('opts', opts, 'table')
 
-  lock_read(opts.confirm)
+  lock_read(opts.confirm, specs)
 
   local plug_dir = get_plug_dir()
   local plugs = {} --- @type vim.pack.Plug[]
@@ -1139,7 +1157,7 @@ local function show_confirm_buf(lines, on_finish)
   --- @type integer
   local cancel_au_id
   local function on_cancel(data)
-    if tonumber(data.match) ~= win_id then
+    if vim._tointeger(data.match) ~= win_id then
       return
     end
     pcall(api.nvim_del_autocmd, cancel_au_id)
@@ -1186,41 +1204,42 @@ end
 --- @field offline? boolean Whether to skip downloading new updates. Default: `false`.
 ---
 --- How to compute a new plugin revision. One of:
----     - "version" (default) - use latest revision matching `version` from plugin specification.
----     - "lockfile" - use revision from the lockfile. Useful for reverting or performing controlled
----       update.
+---   - "version" (default): use latest revision matching `version` from plugin specification.
+---   - "lockfile": use revision from the lockfile. For reverting or performing controlled update.
 --- @field target? string
 
 --- Update plugins
 ---
 --- - Download new changes from source.
 --- - Infer update info (current/target revisions, changelog, etc.).
---- - Depending on `force`:
----     - If `false`, show confirmation buffer. It lists data about all set to
----       update plugins. Pending changes starting with `>` will be applied while
----       the ones starting with `<` will be reverted.
----       It has dedicated buffer-local mappings:
----       - |]]| and |[[| to navigate through plugin sections.
----
----       Some features are provided  via LSP:
----         - 'textDocument/documentSymbol' (`gO` via |lsp-defaults|
----           or |vim.lsp.buf.document_symbol()|) - show structure of the buffer.
----         - 'textDocument/hover' (`K` via |lsp-defaults| or |vim.lsp.buf.hover()|) -
----           show more information at cursor. Like details of particular pending
----           change or newer tag.
----         - 'textDocument/codeAction' (`gra` via |lsp-defaults| or |vim.lsp.buf.code_action()|) -
----           show code actions available for "plugin at cursor".
----           Like "delete" (if plugin is not active), "update" or "skip updating"
----           (if there are pending updates).
----
----       Execute |:write| to confirm update, execute |:quit| to discard the update.
----     - If `true`, make updates right away.
+--- - If `force` is `false` (default), show confirmation buffer.
+---   If `force` is `true`, make updates right away.
 ---
 --- Notes:
---- - Every actual update is logged in "nvim-pack.log" file inside "log" |stdpath()|.
+--- - Every actual update is logged in "nvim-pack.log" file inside "log" |standard-path|.
 --- - It doesn't update source's default branch if it has changed (like from `master` to `main`).
 ---   To have `version = nil` point to a new default branch, re-install the plugin
 ---   (|vim.pack.del()| + |vim.pack.add()|).
+---
+--- Confirmation buffer ~
+---
+--- The goal of the confirmation buffer is to show update details for the user to read, confirm
+--- (execute |:write|) or deny (execute |:quit|) the update.
+---
+--- Pending changes starting with `>` will be applied while the ones starting with `<` will be
+--- reverted.
+---
+--- There are convenience buffer-local mappings:
+--- - |]]| and |[[| to navigate through plugin sections.
+---
+--- Some features are provided via LSP:
+--- - 'textDocument/documentSymbol' (`gO` via |lsp-defaults| or |vim.lsp.buf.document_symbol()|) -
+---   show structure of the buffer.
+--- - 'textDocument/hover' (`K` via |lsp-defaults| or |vim.lsp.buf.hover()|) - show more
+---   information at cursor. Like details of particular pending change or newer tag.
+--- - 'textDocument/codeAction' (`gra` via |lsp-defaults| or |vim.lsp.buf.code_action()|) - show
+---   code actions relevant for "plugin at cursor". Like "delete" (if plugin is not active),
+---   "update" or "skip updating" (if there are pending updates).
 ---
 --- @param names? string[] List of plugin names to update. Must be managed
 --- by |vim.pack|, not necessarily already added to current session.

@@ -815,6 +815,7 @@ retry:
     // Copy the read part of the line, excluding null-terminator
     memcpy(state->growbuf, IObuff, IOSIZE - 1);
     size_t growbuflen = state->linelen;
+    state->growbuf[growbuflen] = NUL;
 
     while (true) {
       errno = 0;
@@ -2365,9 +2366,10 @@ static char *qf_push_dir(char *dirbuf, struct dir_stack_T **stackptr, bool is_fi
 {
   struct dir_stack_T *ds_ptr;
 
-  // allocate new stack element and hook it in
+  // allocate new stack element
   struct dir_stack_T *ds_new = xmalloc(sizeof(struct dir_stack_T));
 
+  // push the new element onto the stack
   ds_new->next = *stackptr;
   *stackptr = ds_new;
 
@@ -2383,12 +2385,13 @@ static char *qf_push_dir(char *dirbuf, struct dir_stack_T **stackptr, bool is_fi
     ds_new = (*stackptr)->next;
     (*stackptr)->dirname = NULL;
     while (ds_new) {
-      xfree((*stackptr)->dirname);
-      (*stackptr)->dirname = concat_fnames(ds_new->dirname, dirbuf, true);
-      if (os_isdir((*stackptr)->dirname)) {
+      char *dirname = concat_fnames(ds_new->dirname, dirbuf, true);
+      if (os_isdir(dirname)) {
+        xfree((*stackptr)->dirname);
+        (*stackptr)->dirname = dirname;
         break;
       }
-
+      xfree(dirname);
       ds_new = ds_new->next;
     }
 
@@ -2410,9 +2413,12 @@ static char *qf_push_dir(char *dirbuf, struct dir_stack_T **stackptr, bool is_fi
   if ((*stackptr)->dirname != NULL) {
     return (*stackptr)->dirname;
   }
+
+  // pop the new element from the stack and free it
   ds_ptr = *stackptr;
   *stackptr = (*stackptr)->next;
   xfree(ds_ptr);
+
   return NULL;
 }
 

@@ -64,6 +64,13 @@ function Provider:new(bufnr)
 end
 
 ---@package
+function Provider:destroy()
+  self:reset_timer()
+  api.nvim_del_augroup_by_id(self.augroup)
+  self.active[self.bufnr] = nil
+end
+
+---@package
 ---@param client_id integer
 function Provider:on_attach(client_id)
   local state = self.client_state[client_id]
@@ -121,6 +128,8 @@ function Provider:handler(err, result, ctx)
 
   state.row_lenses = row_lenses
   self.version = ctx.version
+
+  api.nvim__redraw({ buf = self.bufnr, valid = true, flush = false })
 end
 
 ---@package
@@ -186,20 +195,26 @@ function Provider:resolve(client, unresolved_lens)
     end
 
     local row = unresolved_lens.range.start.line
-    local lenses = assert(state.row_lenses[row])
-    for i, lens in ipairs(lenses) do
-      if lens == unresolved_lens then
-        lenses[i] = resolved_lens
-      end
+    local lenses = state.row_lenses[row]
+    -- A newer textDocument/codeLens response can replace row_lenses while resolve is in flight.
+    if not lenses then
+      return
     end
 
-    self.row_version[row] = nil
-    api.nvim__redraw({
-      buf = self.bufnr,
-      range = { row, row + 1 },
-      valid = true,
-      flush = false,
-    })
+    for i, lens in ipairs(lenses) do
+      -- Only apply if this exact unresolved lens still exists; otherwise response is stale.
+      if lens == unresolved_lens then
+        lenses[i] = resolved_lens
+        self.row_version[row] = nil
+        api.nvim__redraw({
+          buf = self.bufnr,
+          range = { row, row + 1 },
+          valid = true,
+          flush = false,
+        })
+        return
+      end
+    end
   end, self.bufnr)
 end
 
@@ -221,48 +236,54 @@ function Provider:on_win(toprow, botrow)
             return a.range.start.character < b.range.start.character
           end)
 
-          ---@type integer
-          local indent = api.nvim_buf_call(bufnr, function()
-            return vim.fn.indent(row + 1)
-          end)
+          local client = assert(vim.lsp.get_client_by_id(client_id))
+          local range = vim.range.lsp(bufnr, lenses[1].range, client.offset_encoding)
+          ---@type [string, string][]
+          local virt_text = {
+            { string.rep(' ', range.start.col), 'LspCodeLensSeparator' },
+          }
 
-          ---@type [string, string|integer][][]
-          local virt_lines = { { { string.rep(' ', indent), 'LspCodeLensSeparator' } } }
-          local virt_text = virt_lines[1]
           for _, lens in ipairs(lenses) do
             -- A code lens is unresolved when no command is associated to it.
             if not lens.command then
-              local client = assert(vim.lsp.get_client_by_id(client_id)) ---@type vim.lsp.Client
               self:resolve(client, lens)
             else
-              virt_text[#virt_text + 1] = { lens.command.title, 'LspCodeLens' }
-              virt_text[#virt_text + 1] = { ' | ', 'LspCodeLensSeparator' }
+              vim.list_extend(virt_text, {
+                { lens.command.title, 'LspCodeLens' },
+                { ' | ', 'LspCodeLensSeparator' },
+              })
             end
           end
+          -- Remove trailing separator.
+          table.remove(virt_text)
 
-          if #virt_text > 1 then
-            -- Remove trailing separator.
-            virt_text[#virt_text] = nil
-          else
-            -- Use a placeholder to prevent flickering caused by layout shifts.
-            virt_text[#virt_text + 1] = { '...', 'LspCodeLens' }
+          -- Use a placeholder to prevent flickering caused by layout shifts.
+          if #virt_text == 1 then
+            table.insert(virt_text, { '', 'LspCodeLens' })
           end
 
           api.nvim_buf_set_extmark(bufnr, namespace, row, 0, {
-            virt_lines = virt_lines,
+            virt_lines = { virt_text },
             virt_lines_above = true,
             virt_lines_overflow = 'scroll',
             hl_mode = 'combine',
           })
+
+          -- Fix https://github.com/neovim/neovim/issues/16166
+          -- Make sure the code lens on the first line is visible when updating.
+          if row == 0 then
+            vim.cmd('normal! zb')
+          end
         end
         self.row_version[row] = self.version
       end
     end
   end
 
+  -- Clear extmarks beyond the bottom of the buffer.
   if botrow == api.nvim_buf_line_count(self.bufnr) - 1 then
     for _, state in pairs(self.client_state) do
-      api.nvim_buf_clear_namespace(self.bufnr, state.namespace, botrow, -1)
+      api.nvim_buf_clear_namespace(self.bufnr, state.namespace, botrow + 1, -1)
     end
   end
 end

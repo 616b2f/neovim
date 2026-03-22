@@ -23,6 +23,7 @@
 #include "nvim/getchar.h"
 #include "nvim/globals.h"
 #include "nvim/indent.h"
+#include "nvim/insexpand.h"
 #include "nvim/keycodes.h"
 #include "nvim/mark.h"
 #include "nvim/mbyte.h"
@@ -871,7 +872,7 @@ bool get_spec_reg(int regname, char **argp, bool *allocated, bool errmsg)
     }
     size_t cnt = find_ident_under_cursor(argp, (regname == Ctrl_W
                                                 ? (FIND_IDENT|FIND_STRING)
-                                                : FIND_STRING));
+                                                : FIND_STRING), NULL);
     *argp = cnt ? xmemdupz(*argp, cnt) : NULL;
     *allocated = true;
     return true;
@@ -1214,7 +1215,7 @@ void do_autocmd_textyankpost(oparg_T *oap, yankreg_T *reg)
   // The yanked text contents.
   list_T *const list = tv_list_alloc((ptrdiff_t)reg->y_size);
   for (size_t i = 0; i < reg->y_size; i++) {
-    tv_list_append_string(list, reg->y_array[i].data, -1);
+    tv_list_append_string(list, reg->y_array[i].data, (int)reg->y_array[i].size);
   }
   tv_list_set_lock(list, VAR_FIXED);
   tv_dict_add_list(dict, S_LEN("regcontents"), list);
@@ -1300,6 +1301,11 @@ void do_put(int regname, yankreg_T *reg, int dir, int count, int flags)
   const pos_T orig_start = curbuf->b_op_start;
   const pos_T orig_end = curbuf->b_op_end;
   unsigned cur_ve_flags = get_ve_flags(curwin);
+
+  // Remove any preinserted text (issue vim/vim#19329)
+  if (ins_compl_preinsert_effect()) {
+    ins_compl_delete(false);
+  }
 
   curbuf->b_op_start = curwin->w_cursor;        // default for '[ mark
   curbuf->b_op_end = curwin->w_cursor;          // default for '] mark
@@ -2338,7 +2344,7 @@ void *get_reg_contents(int regname, int flags)
   if (flags & kGRegList) {
     list_T *const list = tv_list_alloc((ptrdiff_t)reg->y_size);
     for (size_t i = 0; i < reg->y_size; i++) {
-      tv_list_append_string(list, reg->y_array[i].data, -1);
+      tv_list_append_string(list, reg->y_array[i].data, (int)reg->y_array[i].size);
     }
 
     return list;

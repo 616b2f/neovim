@@ -120,7 +120,7 @@ end
 ---@param ctx lsp.HandlerContext
 function LinkedEditor:handler(err, result, ctx)
   if err then
-    log.error('linkededitingrange', err)
+    log.error('linked_editing_range', err)
     return
   end
 
@@ -222,8 +222,8 @@ function LinkedEditor.new(bufnr)
   api.nvim_create_autocmd('LspDetach', {
     group = augroup,
     buffer = bufnr,
-    callback = function(args)
-      self:detach(args.data.client_id)
+    callback = function(ev)
+      self:detach(ev.data.client_id)
     end,
   })
 

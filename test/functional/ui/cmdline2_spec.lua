@@ -78,17 +78,17 @@ describe('cmdline2', function()
       {1:~                                                    }|*9
       {16::}{15:if} {26:1}                                                |
       {16::}  {15:echo} {26:"foo"}                                        |
-      {15:foo}                                                  |
+      foo                                                  |
       {16::}  ^                                                  |
     ]])
     feed([[echo input("foo\nbar:")<CR>]])
     screen:expect([[
                                                            |
       {1:~                                                    }|*7
-      :if 1                                                |
-      :  echo "foo"                                        |
+      {16::}{15:if} {26:1}                                                |
+      {16::}  {15:echo} {26:"foo"}                                        |
       foo                                                  |
-      :  echo input("foo\nbar:")                           |
+      {16::}  {15:echo} {25:input}{16:(}{26:"foo\nbar:"}{16:)}                           |
       foo                                                  |
       bar:^                                                 |
     ]])
@@ -96,10 +96,10 @@ describe('cmdline2', function()
     screen:expect([[
                                                            |
       {1:~                                                    }|*7
-      :if 1                                                |
-      :  echo "foo"                                        |
+      {16::}{15:if} {26:1}                                                |
+      {16::}  {15:echo} {26:"foo"}                                        |
       foo                                                  |
-      :  echo input("foo\nbar:")                           |
+      {16::}  {15:echo} {25:input}{16:(}{26:"foo\nbar:"}{16:)}                           |
       foo                                                  |
       bar:baz^                                              |
     ]])
@@ -109,11 +109,11 @@ describe('cmdline2', function()
       {1:~                                                    }|*5
       {16::}{15:if} {26:1}                                                |
       {16::}  {15:echo} {26:"foo"}                                        |
-      {15:foo}                                                  |
+      foo                                                  |
       {16::}  {15:echo} {25:input}{16:(}{26:"foo\nbar:"}{16:)}                           |
-      {15:foo}                                                  |
-      {15:bar}:baz                                              |
-      {15:baz}                                                  |
+      foo                                                  |
+      bar:baz                                              |
+      baz                                                  |
       {16::}  ^                                                  |
     ]])
     feed('endif')
@@ -122,11 +122,11 @@ describe('cmdline2', function()
       {1:~                                                    }|*5
       {16::}{15:if} {26:1}                                                |
       {16::}  {15:echo} {26:"foo"}                                        |
-      {15:foo}                                                  |
+      foo                                                  |
       {16::}  {15:echo} {25:input}{16:(}{26:"foo\nbar:"}{16:)}                           |
-      {15:foo}                                                  |
-      {15:bar}:baz                                              |
-      {15:baz}                                                  |
+      foo                                                  |
+      bar:baz                                              |
+      baz                                                  |
       {16::}  {15:endif}^                                             |
     ]])
     feed('<CR>')
@@ -178,7 +178,7 @@ describe('cmdline2', function()
     screen:expect([[
       {10:f}oo                                                  |
       {1:~                                                    }|*12
-      {16::}{15:s}{16:/f}^                                                 |
+      {16::}{15:s}{16:/f^ }                                                |
     ]])
   end)
 
@@ -244,24 +244,20 @@ describe('cmdline2', function()
     feed('call confirm("Ok?")<CR>')
     screen:try_resize(screen._width + 1, screen._height)
     screen:expect([[
-                                                            |
-      {1:~                                                     }|*8
+                                                            |*10
       {3:                                                      }|
                                                             |
       {6:Ok?}                                                   |
-                                                            |
       {6:[O]k: }^                                                |
     ]])
     -- And resizing the next event loop iteration also works.
     feed('k')
     screen:try_resize(screen._width, screen._height + 1)
     screen:expect([[
-                                                            |
-      {1:~                                                     }|*9
+                                                            |*11
       {3:                                                      }|
                                                             |
       {6:Ok?}                                                   |
-                                                            |
       {6:[O]k: }^                                                |
     ]])
   end)

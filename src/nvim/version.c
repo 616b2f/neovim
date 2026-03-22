@@ -26,6 +26,7 @@
 #include "nvim/grid_defs.h"
 #include "nvim/highlight.h"
 #include "nvim/highlight_defs.h"
+#include "nvim/highlight_group.h"
 #include "nvim/lua/executor.h"
 #include "nvim/mbyte.h"
 #include "nvim/memory.h"
@@ -46,7 +47,7 @@
 #endif
 #define NVIM_VERSION_LONG "NVIM " NVIM_VERSION_MEDIUM  // NOLINT(bugprone-suspicious-missing-comma)
 
-char *Versions[] = { "8.1", "8.2", "9.0", "9.1" };
+char *Versions[] = { "8.1", "8.2", "9.0", "9.1", "9.2" };
 char *longVersion = NVIM_VERSION_LONG;
 char *version_buildtype = "Build type: " NVIM_VERSION_BUILD_TYPE;
 // Reproducible builds: omit compile info in Release builds. #15424
@@ -57,9 +58,9 @@ char *version_cflags = "Compilation: " NVIM_VERSION_CFLAGS;
 #include "version.c.generated.h"
 
 // clang-format off
-static const int vim_versions[] = { 801, 802, 900, 901 };
+static const int vim_versions[] = { 801, 802, 900, 901, 902 };
 
-static const int num_patches[] = { 2331, 3802, 1574, 1602 };
+static const int num_patches[] = { 2331, 3803, 1574, 1612, 76 };
 
 static const int *included_patchsets[] = {
   (const int[]) {  // 801
@@ -868,7 +869,9 @@ static const int *included_patchsets[] = {
     3848,
     // 3847
     3846, 3845, 3844, 3843,
-    // 3840-3842
+    // 3842
+    3841,
+    // 3840
     3839, 3838,
     // 3835-3837
     3834, 3833,
@@ -3065,6 +3068,8 @@ static const int *included_patchsets[] = {
     // 0
   },
   (const int[]) {  // 901
+    2147, 2146,
+    // 2139-2145
     2138,
     // 2137
     2136, 2135,
@@ -3073,17 +3078,15 @@ static const int *included_patchsets[] = {
     // 2131
     2130,
     // 2129
-    2128,
-    // 2124-2127
+    2128, 2127,
+    // 2126
+    2125,
+    // 2124
     2123, 2122,
     // 2120-2121
-    2119, 2118,
-    // 2117
-    2116,
+    2119, 2118, 2117, 2116,
     // 2113-2115
-    2112,
-    // 2111
-    2110, 2109, 2108, 2107,
+    2112, 2111, 2110, 2109, 2108, 2107,
     // 2106
     2105,
     // 2104
@@ -3136,8 +3139,8 @@ static const int *included_patchsets[] = {
     1965, 1964, 1963, 1962, 1961, 1960,
     // 1959
     1958, 1957,
-    // 1954-1956
-    1953, 1952, 1951, 1950, 1949, 1948, 1947,
+    // 1955-1956
+    1954, 1953, 1952, 1951, 1950, 1949, 1948, 1947,
     // 1946
     1945, 1944, 1943, 1942, 1941,
     // 1940
@@ -3305,8 +3308,8 @@ static const int *included_patchsets[] = {
     1491, 1490,
     // 1489
     1488,
-    // 1484-1487
-    1483, 1482, 1481,
+    // 1485-1487
+    1484, 1483, 1482, 1481,
     // 1480
     1479, 1478, 1477, 1476, 1475, 1474, 1473, 1472, 1471, 1470,
     // 1469
@@ -3631,11 +3634,7 @@ static const int *included_patchsets[] = {
     // 545
     544, 543,
     // 542
-    541, 540,
-    // 539
-    538, 537, 536,
-    // 535
-    534, 533, 532, 531, 530, 529, 528,
+    541, 540, 539, 538, 537, 536, 535, 534, 533, 532, 531, 530, 529, 528,
     // 527
     526, 525, 524,
     // 522-523
@@ -3814,6 +3813,80 @@ static const int *included_patchsets[] = {
     16, 15, 14, 13, 12, 11, 10, 9, 8, 7,
     // 6
     5, 4, 3, 2, 1,
+    // 0
+  },
+  (const int[]) {  // 902
+    155,
+    // 153-154
+    152,
+    // 148-151
+    147,
+    // 141-146
+    140,
+    // 138-139
+    137,
+    // 133-136
+    132, 131, 130,
+    // 126-129
+    125, 124, 123, 122, 121, 120,
+    // 115-119
+    114,
+    // 110-113
+    109, 108,
+    // 107
+    106, 105,
+    // 103-104
+    102,
+    // 98-101
+    97,
+    // 92-96
+    91, 90,
+    // 89
+    88, 87, 86,
+    // 85
+    84,
+    // 83
+    82, 81,
+    // 79-80
+    78, 77,
+    // 76
+    75, 74,
+    // 72-73
+    71, 70,
+    // 68-69
+    67, 66, 65, 64, 63, 62, 61,
+    // 60
+    59, 58, 57, 56, 55, 54,
+    // 53
+    52,
+    // 48-51
+    47, 46,
+    // 45
+    44,
+    // 42-43
+    41, 40,
+    // 39
+    38,
+    // 37
+    36,
+    // 34-35
+    33, 32, 31, 30,
+    // 29
+    28, 27,
+    // 26
+    25, 24, 23, 22,
+    // 21
+    20,
+    // 19
+    18,
+    // 14-17
+    13, 12,
+    // 11
+    10, 9, 8, 7,
+    // 5-6
+    4,
+    // 2-3
+    1,
     // 0
   },
 };
@@ -4116,20 +4189,24 @@ bool may_show_intro(void)
 void intro_message(bool colon)
 {
   static char *(lines[]) = {
-    N_(NVIM_VERSION_LONG),
+    "│ ╲ ││",
+    "││╲╲││",
+    "││ ╲ │",
     "",
+    N_(NVIM_VERSION_LONG),
+    "────────────────────────────────────────────",
     N_("Nvim is open source and freely distributable"),
     "https://neovim.io/#chat",
-    "",
-    N_("type  :help nvim<Enter>       if you are new! "),
-    N_("type  :checkhealth<Enter>     to optimize Nvim"),
-    N_("type  :q<Enter>               to exit         "),
-    N_("type  :help<Enter>            for help        "),
-    "",
-    N_("type  :help news<Enter> to see changes in v%s.%s"),
-    "",
+    "────────────────────────────────────────────",
+    N_("type  :help nvim<Enter>     if you are new! "),
+    N_("type  :checkhealth<Enter>   to optimize Nvim"),
+    N_("type  :q<Enter>             to exit         "),
+    N_("type  :help<Enter>          for help        "),
+    "────────────────────────────────────────────",
+    N_("type  :help news<Enter>     for v%s.%s notes "),
+    "────────────────────────────────────────────",
     N_("Help poor children in Uganda!"),
-    N_("type  :help Kuwasha<Enter>    for information "),
+    N_("type  :help Kuwasha<Enter>  for information "),
   };
 
   // blanklines = screen height - # message lines
@@ -4174,8 +4251,8 @@ void intro_message(bool colon)
         }
       }
 
-      if (*mesg != NUL) {
-        do_intro_line(row, mesg, colon);
+      if (*mesg != NUL && row < Rows - 1) {
+        do_intro_line(row, mesg, colon, i < 3);
       }
       row++;
 
@@ -4186,22 +4263,64 @@ void intro_message(bool colon)
   }
 }
 
-static void do_intro_line(int row, char *mesg, bool colon)
+/// Adds extra highlighting.
+static void do_intro_line(int row, char *mesg, bool colon, bool is_logo)
 {
   int l;
-
   // Center the message horizontally.
   int col = vim_strsize(mesg);
-
   col = (Columns - col) / 2;
-
   if (col < 0) {
     col = 0;
   }
 
   grid_line_start((!colon && ui_has(kUIMultigrid)) ? &firstwin->w_grid : &default_gridview, row);
 
-  // Split up in parts to highlight <> items differently.
+  // Compute special highlighting attributes
+  int id_attr = syn_id2attr(syn_name2id("Identifier"));
+  int nontext_attr = syn_id2attr(syn_name2id("NonText"));
+  int special_attr = syn_id2attr(syn_name2id("Special"));
+  int string_attr = syn_id2attr(syn_name2id("String"));
+
+  // Handle logo lines
+  if (is_logo) {
+    bool seen_diagonal = false;
+
+    for (char *p = mesg; *p != NUL;) {
+      int clen = utfc_ptr2len(p);
+      int attr = 0;
+      // Multi-byte (box-drawing) character.
+      if ((uint8_t)(*p) >= 0x80) {
+        // Found "╲" diagonal logo part.
+        seen_diagonal = seen_diagonal || (clen == 3 && utf_ptr2char(p) == 0x2572);
+        attr = seen_diagonal ? string_attr : special_attr;
+      }
+      col += grid_line_puts(col, p, clen, attr);
+      p += clen;
+    }
+
+    grid_line_flush();
+    return;
+  }
+
+  // Try highlighting full line:
+  // - Version starts with "NVIM".
+  // - Separator line consists from ─ (UTF-8: E2 94 80).
+  bool is_version = mesg[0] == 'N' && mesg[1] == 'V' && mesg[2] == 'I' && mesg[3] == 'M';
+  bool is_sep = utfc_ptr2len(mesg) == 3 && utf_ptr2char(mesg) == 0x2500;
+  if (is_version || is_sep) {
+    int clen = is_sep ? 3 : 1;
+    int attr = is_sep ? nontext_attr : string_attr;
+
+    for (char *p = mesg; *p != NUL;) {
+      col += grid_line_puts(col, p, clen, attr);
+      p += clen;
+    }
+    grid_line_flush();
+    return;
+  }
+
+  // Highlight `:...<Enter>` differently.
   for (char *p = mesg; *p != NUL; p += l) {
     for (l = 0;
          p[l] != NUL && (l == 0 || (p[l] != '<' && p[l - 1] != '>'));
@@ -4209,7 +4328,25 @@ static void do_intro_line(int row, char *mesg, bool colon)
       l += utfc_ptr2len(p + l) - 1;
     }
     assert(row <= INT_MAX && col <= INT_MAX);
-    col += grid_line_puts(col, p, l, *p == '<' ? HL_ATTR(HLF_8) : 0);
+
+    if (*p == '<') {
+      col += grid_line_puts(col, p, l, HL_ATTR(HLF_8));
+    } else {
+      // Check for ":command" pattern before a <key> segment.
+      char *colon_pos = memchr(p, ':', (size_t)l);
+      if (colon_pos != NULL && p[l] == '<') {
+        // No highlight for "type  ".
+        int prefix_len = (int)(colon_pos - p);
+        col += grid_line_puts(col, p, prefix_len, 0);
+        // Highlight ":".
+        col += grid_line_puts(col, colon_pos, 1, HL_ATTR(HLF_8));
+        // Highlight "command" (after the ":").
+        int cmd_len = l - prefix_len - 1;
+        col += grid_line_puts(col, colon_pos + 1, cmd_len, id_attr);
+      } else {
+        col += grid_line_puts(col, p, l, 0);
+      }
+    }
   }
   grid_line_flush();
 }

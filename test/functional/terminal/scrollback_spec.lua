@@ -44,8 +44,11 @@ local function test_terminal_scrollback(hide_curbuf)
       else
         -- Cursor position was restored from wi_mark, not b_last_cursor.
         -- Check that b_last_cursor and wi_mark are the same.
-        local last_cursor = fn.getpos([['"]])
-        local restored_cursor = fn.getpos('.')
+        --- @type integer[], integer[]
+        local last_cursor, restored_cursor = unpack(exec_lua(function()
+          -- Get these two positions on the same RPC call.
+          return { vim.fn.getpos([['"]]), vim.fn.getpos('.') }
+        end))
         if last_cursor[2] > 0 then
           eq(restored_cursor, last_cursor)
         else
@@ -97,9 +100,8 @@ local function test_terminal_scrollback(hide_curbuf)
     screen = tt.setup_screen(nil, nil, 30)
     buf = api.nvim_get_current_buf()
     chan = api.nvim_get_option_value('channel', { buf = buf })
-    if hide_curbuf then
-      otherbuf = api.nvim_create_buf(true, false)
-    end
+    otherbuf = hide_curbuf and api.nvim_create_buf(true, false) or nil
+    restore_terminal_mode = nil
   end)
 
   describe('when the limit is exceeded', function()
@@ -859,12 +861,12 @@ describe(':terminal prints more lines than the screen height and exits', functio
       ("call jobstart(['%s', '10'], {'term':v:true}) | startinsert"):format(testprg('tty-test'))
     )
     screen:expect([[
+      line5                         |
       line6                         |
       line7                         |
       line8                         |
       line9                         |
-                                    |
-      [Process exited 0]^            |
+      ^[Process exited 0]            |
       {5:-- TERMINAL --}                |
     ]])
     feed('<cr>')
@@ -1094,11 +1096,35 @@ describe('pending scrollback line handling', function()
         or { 'printf', ('hi\n'):rep(12) }
     )
     screen:expect [[
-      hi                            |*4
-                                    |
-      [Process exited 0]^            |
+      hi                            |*5
+      ^[Process exited 0]            |
       {5:-- TERMINAL --}                |
     ]]
+    assert_alive()
+  end)
+
+  it('does not crash after deleting buffer lines', function()
+    local buf = api.nvim_get_current_buf()
+    local chan = api.nvim_open_term(buf, {})
+    api.nvim_chan_send(chan, ('a\n'):rep(11) .. 'a')
+    screen:expect([[
+      ^a                             |
+      a                             |*5
+                                    |
+    ]])
+    api.nvim_set_option_value('modifiable', true, { buf = buf })
+    api.nvim_buf_set_lines(buf, 0, -1, true, {})
+    screen:expect([[
+      ^                              |
+      {1:~                             }|*5
+                                    |
+    ]])
+    api.nvim_chan_send(chan, ('\nb'):rep(11) .. '\n')
+    screen:expect([[
+      b                             |*5
+      ^                              |
+                                    |
+    ]])
     assert_alive()
   end)
 end)

@@ -1624,11 +1624,13 @@ local options = {
            fuzzy    Enable |fuzzy-matching| for completion candidates.  This
         	    allows for more flexible and intuitive matching, where
         	    characters can be skipped and matches can be found even
-        	    if the exact sequence is not typed.
+        	    if the exact sequence is not typed (disabled for thesaurus
+        	    completion |compl-thesaurus|).
 
            longest
         	    When 'autocomplete' is not active, only the longest common
-        	    prefix of the matches is inserted.  If the popup menu is
+        	    prefix of the matches is inserted (disabled for thesaurus
+        	    completion |compl-thesaurus|).  If the popup menu is
         	    displayed, you can use CTRL-L to add more characters.
         	    Whether case is ignored depends on the type of completion.
         	    For buffer text the 'ignorecase' option applies.
@@ -2457,7 +2459,10 @@ local options = {
         				difference.  Non-alphanumeric
         				multi-byte characters such as emoji
         				and CJK characters are considered
-        				individual words.
+        				individual words.  Small gaps of
+        				non-word characters (5 bytes or less)
+        				between changes are merged into a
+        				single highlight block.
 
         	internal	Use the internal diff library.  This is
         			ignored when 'diffexpr' is set.  *E960*
@@ -3845,7 +3850,7 @@ local options = {
         This is a scanf-like string that uses the same format as the
         'errorformat' option: see |errorformat|.
 
-        If ripgrep ('grepprg') is available, this option defaults to `%f:%l:%c:%m`.
+        Defaults to "%f:%l:%c:%m" if ripgrep ('grepprg') is available.
       ]=],
       full_name = 'grepformat',
       list = 'onecomma',
@@ -3863,28 +3868,34 @@ local options = {
         doc = [[see below]],
       },
       desc = [=[
-        Program to use for the |:grep| command.  This option may contain '%'
-        and '#' characters, which are expanded like when used in a command-
-        line.  The placeholder "$*" is allowed to specify where the arguments
-        will be included.  Environment variables are expanded |:set_env|.  See
-        |option-backslash| about including spaces and backslashes.
+        Program to use for the |:grep| command.
+        Note: if you change this then you must also update 'grepformat'.
+
+        May contain "%" and "#" characters, are expanded per |cmdline-special|.
+        The placeholder "$*" specifies where the arguments will be included.
+        Environment variables are expanded |:set_env|.  See |option-backslash|
+        about including spaces and backslashes.
+
         Special value: When 'grepprg' is set to "internal" the |:grep| command
         works like |:vimgrep|, |:lgrep| like |:lvimgrep|, |:grepadd| like
         |:vimgrepadd| and |:lgrepadd| like |:lvimgrepadd|.
-        See also the section |:make_makeprg|, since most of the comments there
-        apply equally to 'grepprg'.
+
+        See also |:make_makeprg|, most of the comments there apply to 'grepprg'.
+
+        Defaults to:
+        - "rg --vimgrep -uu " if ripgrep is available (|:checkhealth|),
+        - "grep -HIn $* /dev/null" on Unix,
+        - "findstr /n $* nul" on Windows.
+
+        Ripgrep may perform additional filtering such as using .gitignore rules
+        and skipping hidden files. This is disabled by default (via "-u") to
+        more closely match the behaviour of standard grep.
+        You can make ripgrep match Vim's case handling using the
+        -i/--ignore-case and -S/--smart-case options. Handle |OptionSet| to
+        dynamically update 'grepprg' when e.g. 'ignorecase' is changed.
+
         This option cannot be set from a |modeline| or in the |sandbox|, for
         security reasons.
-        This option defaults to:
-        - `rg --vimgrep -uu ` if ripgrep is available (|:checkhealth|),
-        - `grep -HIn $* /dev/null` on Unix,
-        - `findstr /n $* nul` on Windows.
-        Ripgrep can perform additional filtering such as using .gitignore rules
-        and skipping hidden files. This is disabled by default (see the -u option)
-        to more closely match the behaviour of standard grep.
-        You can make ripgrep match Vim's case handling using the
-        -i/--ignore-case and -S/--smart-case options.
-        An |OptionSet| autocmd can be used to set it up to match automatically.
       ]=],
       expand = true,
       full_name = 'grepprg',
@@ -3983,6 +3994,7 @@ local options = {
 
         Examples of cursor highlighting: >vim
             highlight Cursor gui=reverse guifg=NONE guibg=NONE
+            " Note: gui=reverse overrides colors.
             highlight Cursor gui=NONE guifg=bg guibg=fg
         <
       ]=],
@@ -3998,6 +4010,11 @@ local options = {
       abbreviation = 'gfn',
       defaults = {
         if_true = macros('DFLT_GFN', 'string'),
+        doc = [["DejaVu Sans Mono,Courier New,monospace"
+          Mac: "SF Mono,Menlo,Monaco,Courier New,monospace"
+          Linux: "Source Code Pro,DejaVu Sans Mono,Courier New,monospace"
+          MS-Windows: "Cascadia Code,Cascadia Mono,Consolas,Courier New,monospace"]],
+        meta = 'DFLT_GFN',
       },
       desc = [=[
         This is a list of fonts which will be used for the GUI version of Vim.
@@ -5050,24 +5067,31 @@ local options = {
       abbreviation = 'kp',
       defaults = {
         condition = 'MSWIN',
-        if_true = ':help',
+        if_true = ':help!',
         if_false = ':Man',
         doc = '":Man", Windows: ":help"',
       },
       desc = [=[
         Program to use for the |K| command.  Environment variables are
-        expanded |:set_env|.  ":help" may be used to access the Vim internal
-        help.  (Note that previously setting the global option to the empty
-        value did this, which is now deprecated.)
-        When the first character is ":", the command is invoked as a Vim
-        Ex command prefixed with [count].
-        When "man" or "man -s" is used, Vim will automatically translate
-        a [count] for the "K" command to a section number.
+        expanded |:set_env|.
+
+        Special cases:
+        - ":help" opens the |word| at cursor using |:help|.  (Note that
+          previously setting the global option to the empty value did this,
+          which is now deprecated.)
+        - ":help!" performs |:help!| (DWIM) on the |WORD| at cursor.
+        - If the value starts with ":", it is invoked as an Ex command
+          prefixed with [count].
+        - If "man" or "man -s", [count] is the manpage section number.
+
         See |option-backslash| about including spaces and backslashes.
+
         Example: >vim
+        	set keywordprg=:help!
         	set keywordprg=man\ -s
         	set keywordprg=:Man
-        <	This option cannot be set from a |modeline| or in the |sandbox|, for
+        <
+        This option cannot be set from a |modeline| or in the |sandbox|, for
         security reasons.
       ]=],
       expand = true,
@@ -5381,7 +5405,7 @@ local options = {
         The cursor is displayed at the start of the space a Tab character
         occupies, not at the end as usual in Normal mode.  To get this cursor
         position while displaying Tabs with spaces, use: >vim
-        	set list lcs=tab:\ \
+        	let &list = v:true | let &lcs = 'tab:  '
         <
         Note that list mode will also affect formatting (set with 'textwidth'
         or 'wrapmargin') when 'cpoptions' includes 'L'.  See 'listchars' for
@@ -5458,6 +5482,15 @@ local options = {
         <
         		Where "XXX" denotes the first non-blank characters in
         		the line.
+        						*lcs-leadtab*
+          leadtab:xy[z]
+        		Like |lcs-tab|, but only for leading tabs.  When
+        		omitted, the "tab" setting is used for leading tabs.
+        		|lcs-tab| must also be set for this to work. *E1572*
+        		You can combine it with "tab:", for example: >vim
+        			let &listchars = 'tab:>-,leadtab:. '
+        <			This shows leading tabs as periods(.) and other tabs
+        		as ">--".
         						*lcs-trail*
           trail:c	Character to show for trailing spaces.  When omitted,
         		trailing spaces are blank.  Overrides the "space" and
@@ -5750,29 +5783,34 @@ local options = {
     {
       abbreviation = 'mopt',
       cb = 'did_set_messagesopt',
-      defaults = 'hit-enter,history:500',
-      values = { 'hit-enter', 'wait:', 'history:' },
+      defaults = 'hit-enter,history:500,progress:c',
+      values = { 'hit-enter', 'wait:', 'history:', 'progress:' },
       flags = true,
       deny_duplicates = true,
       desc = [=[
         Option settings for outputting messages.  It can consist of the
         following items.  Items must be separated by a comma.
 
-        hit-enter	Use a |hit-enter| prompt when the message is longer than
-        		'cmdheight' size.
-
-        wait:{n}	Instead of using a |hit-enter| prompt, simply wait for
-        		{n} milliseconds so that the user has a chance to read
-        		the message.  The maximum value of {n} is 10000.  Use
-        		0 to disable the wait (but then the user may miss an
-        		important message).
-        		This item is ignored when "hit-enter" is present, but
-        		required when "hit-enter" is not present.
-
         history:{n}	Determines how many entries are remembered in the
         		|:messages| history.  The maximum value is 10000.
         		Setting it to zero clears the message history.
         		This item must always be present.
+
+        hit-enter	Use a |hit-enter| prompt when the message is longer than
+        		'cmdheight' size.
+
+        progress:{s}	Determines where to show progress messages.
+        		Valid values are:
+        		  - empty: Progress messages not shown in cmdline.
+        		  - "c": Progress messages are shown in cmdline.
+
+        wait:{n}	Deprecated with |ui2|.
+        		Instead of a |hit-enter| prompt, simply wait for {n}
+        		milliseconds so the user has a chance to read the
+        		message.  Maximum {n} is 10000.  Use 0 to disable the
+        		wait (user won't see any "hit-enter" messages).
+        		Ignored when "hit-enter" is present, but required when
+        		"hit-enter" is not present.
       ]=],
       full_name = 'messagesopt',
       list = 'onecommacolon',
@@ -5918,8 +5956,13 @@ local options = {
         result of a BufNewFile, BufRead/BufReadPost, BufWritePost,
         FileAppendPost or VimLeave autocommand event.  See |gzip-example| for
         an explanation.
-        When 'buftype' is "nowrite" or "nofile" this option may be set, but
+
+        When 'buftype' is "prompt", 'modified' is not implicitly set when the
+        buffer is changed, but a user or plugin may explicitly set it.
+
+        When 'buftype' is "nowrite" or "nofile", this option may be set, but
         will be ignored.
+
         Note that the text may actually be the same, e.g. 'modified' is set
         when using "rA" on an "A".
       ]=],
@@ -6656,6 +6699,9 @@ local options = {
         Defines the default border style of popupmenu windows. See 'winborder' for
         valid values. |hl-PmenuBorder| is used for highlighting the border, and when
         style is "shadow" the |hl-PmenuShadow| and |hl-PmenuShadowThrough| groups are used.
+
+        This option also applies to mouse popup menus when 'mousemodel' is set to
+        "popup" or "popup_setpos", which will display borders using the same style.
       ]=],
       short_desc = N_('border of popupmenu'),
       type = 'string',
@@ -8759,11 +8805,13 @@ local options = {
         if_true = table.concat({
           '%<',
           '%f %h%w%m%r ',
+          "%{% v:lua.require('vim._core.util').term_exitcode() %}",
           '%=',
+          "%{% luaeval('(package.loaded[''vim.ui''] and vim.ui.progress_status()) or '''' ')%}",
           "%{% &showcmdloc == 'statusline' ? '%-10.S ' : '' %}",
           "%{% exists('b:keymap_name') ? '<'..b:keymap_name..'> ' : '' %}",
           "%{% &busy > 0 ? '◐ ' : '' %}",
-          "%{% luaeval('(package.loaded[''vim.diagnostic''] and #vim.diagnostic.count() ~= 0 and vim.diagnostic.status() .. '' '') or '''' ') %}",
+          "%{% luaeval('(package.loaded[''vim.diagnostic''] and next(vim.diagnostic.count()) and vim.diagnostic.status() .. '' '') or '''' ') %}",
           "%{% &ruler ? ( &rulerformat == '' ? '%-14.(%l,%c%V%) %P' : &rulerformat ) : '' %}",
         }),
         doc = 'is very long',
@@ -8788,10 +8836,10 @@ local options = {
         current window and buffer, while %{} items are evaluated in the
         context of the window that the statusline belongs to.
 
-        When there is error while evaluating the option then it will be made
-        empty to avoid further errors.  Otherwise screen updating would loop.
-        When the result contains unprintable characters the result is
-        unpredictable.
+        When there is an error while evaluating the option it will be reset to
+        its default value to avoid further errors.  Otherwise screen updating
+        would loop.  When the result contains unprintable characters the
+        result is unpredictable.
 
         Note that the only effect of 'ruler' when this option is set (and
         'laststatus' is 2 or 3) is controlling the output of |CTRL-G|.
@@ -9647,10 +9695,11 @@ local options = {
       cb = 'did_set_title_icon',
       defaults = false,
       desc = [=[
-        When on, the title of the window will be set to the value of
-        'titlestring' (if it is not empty), or to:
+        If enabled, Nvim will update the (GUI or terminal) window title. The
+        format is configured by 'titlestring'. By default it looks like: >
         	filename [+=-] (path) - Nvim
-        Where:
+        <
+        where: >
         	filename	the name of the file being edited
         	-		indicates the file cannot be modified, 'ma' off
         	+		indicates the file was modified
@@ -9658,6 +9707,7 @@ local options = {
         	=+		indicates the file is read-only and modified
         	(path)		is the path of the file being edited
         	- Nvim		the server name |v:servername| or "Nvim"
+        <
       ]=],
       full_name = 'title',
       scope = { 'global' },
@@ -9705,31 +9755,31 @@ local options = {
       cb = 'did_set_titlestring',
       defaults = '',
       desc = [=[
-        When this option is not empty, it will be used for the title of the
-        window.  This happens only when the 'title' option is on.
+        Formats the window title, enabled by the 'title' option.
 
-        When this option contains printf-style '%' items, they will be
-        expanded according to the rules used for 'statusline'.  If it contains
-        an invalid '%' format, the value is used as-is and no error or warning
-        will be given when the value is set.
+        Contains printf-style "%" items, expanded according to the rules of
+        'statusline'.  If a "%" format is invalid, it is used as-is and no
+        error will be given.
 
-        The default behaviour is equivalent to: >vim
+        The default (empty) behaviour is equivalent to: >vim
             set titlestring=%t%(\ %M%)%(\ \(%{expand(\"%:~:h\")}\)%)%a\ -\ Nvim
         <
-        This option cannot be set in a modeline when 'modelineexpr' is off.
-
         Example: >vim
             auto BufEnter * let &titlestring = hostname() .. "/" .. expand("%:p")
             set title titlestring=%<%F%=%l/%L-%P titlelen=70
-        <	The value of 'titlelen' is used to align items in the middle or right
-        of the available space.
-        Some people prefer to have the file name first: >vim
+        <	The value of 'titlelen' is used to align items in the middle
+        or right of the available space.
+
+        Example: to have the file name first: >vim
             set titlestring=%t%(\ %M%)%(\ (%{expand(\"%:~:.:h\")})%)%(\ %a%)
-        <	Note the use of "%{ }" and an expression to get the path of the file,
-        without the file name.  The "%( %)" constructs are used to add a
+        <	Note the use of "%{ }" and an expression to get the path of
+        the file, without the file name.  The "%( %)" constructs add a
         separating space only when needed.
+
         NOTE: Use of special characters in 'titlestring' may cause the display
         to be garbled (e.g., when it contains a CR or NL character).
+
+        This option cannot be set in a modeline when 'modelineexpr' is off.
       ]=],
       full_name = 'titlestring',
       modelineexpr = true,

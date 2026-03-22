@@ -568,7 +568,7 @@ function vim.api.nvim_buf_line_count(buffer) end
 --- @param opts vim.api.keyset.set_extmark Optional parameters.
 --- - id : id of the extmark to edit.
 --- - end_row : ending line of the mark, 0-based inclusive.
---- - end_col : ending col of the mark, 0-based exclusive.
+--- - end_col : ending col of the mark, 0-based exclusive, or -1 to extend the range to end of line.
 --- - hl_group : highlight group used for the text range. This and below
 ---     highlight groups can be supplied either as a string or as an integer,
 ---     the latter of which can be obtained using `nvim_get_hl_id_by_name()`.
@@ -831,47 +831,48 @@ function vim.api.nvim_call_function(fn, args) end
 --- @param data string Data to write. 8-bit clean: may contain NUL bytes.
 function vim.api.nvim_chan_send(chan, data) end
 
---- Clears all autocommands selected by {opts}. To delete autocmds see `nvim_del_autocmd()`.
+--- Clears all autocommands matching the {opts} query. To delete autocmds see `nvim_del_autocmd()`.
 ---
---- @param opts vim.api.keyset.clear_autocmds Parameters
---- - event: (vim.api.keyset.events|vim.api.keyset.events[])
----      Examples:
----      - event: "pat1"
----      - event: { "pat1" }
----      - event: { "pat1", "pat2", "pat3" }
---- - pattern: (string|table)
----     - pattern or patterns to match exactly.
----         - For example, if you have `*.py` as that pattern for the autocmd,
----           you must pass `*.py` exactly to clear it. `test.py` will not
----           match the pattern.
----     - defaults to clearing all patterns.
----     - NOTE: Cannot be used with {buffer}
---- - buffer: (bufnr)
----     - clear only `autocmd-buflocal` autocommands.
----     - NOTE: Cannot be used with {pattern}
---- - group: (string|int) The augroup name or id.
----     - NOTE: If not passed, will only delete autocmds *not* in any group.
+--- @param opts vim.api.keyset.clear_autocmds Optional parameters:
+--- - event: (`vim.api.keyset.events|vim.api.keyset.events[]?`)
+---   Examples:
+---   - event: "pat1"
+---   - event: { "pat1" }
+---   - event: { "pat1", "pat2", "pat3" }
+--- - pattern: (`string|table?`) Filter by patterns (exact match). Not allowed with {buffer}.
+---   - Example: if you have `*.py` as that pattern for the autocmd, you must pass `*.py`
+---     exactly to clear it. `test.py` will not match the pattern.
+--- - buffer: (`integer?`) Select `autocmd-buflocal` autocommands. Not allowed with {pattern}.
+--- - group: (`string|int?`) Group name or id.
+---   - NOTE: If not given, matches autocmds *not* in any group.
 function vim.api.nvim_clear_autocmds(opts) end
 
---- Executes an Ex command.
+--- Executes an Ex command `cmd`, specified as a Dict with the same structure as returned by
+--- `nvim_parse_cmd()`.
 ---
---- Unlike `nvim_command()` this command takes a structured Dict instead of a String. This
---- allows for easier construction and manipulation of an Ex command. This also allows for things
---- such as having spaces inside a command argument, expanding filenames in a command that otherwise
---- doesn't expand filenames, etc. Command arguments may also be Number, Boolean or String.
+--- Use `magic={…=false}` to disable special chars:
+--- ```lua
+--- vim.api.nvim_cmd({
+---     cmd = 'edit',
+---     args = { '%foo"|bar#baz"' },
+---     magic = { file = false, bar = false }
+---   },
+---   {}
+--- )
+--- ```
 ---
---- The first argument may also be used instead of count for commands that support it in order to
---- make their usage simpler with `vim.cmd()`. For example, instead of
---- `vim.cmd.bdelete{ count = 2 }`, you may do `vim.cmd.bdelete(2)`.
+--- - See `nvim_parse_cmd()` to parse a cmdline string (which can then be passed to `nvim_cmd`).
+--- - See `nvim_command()` to execute a cmdline string.
 ---
 --- On execution error: fails with Vimscript error, updates v:errmsg.
 ---
 ---
---- @see vim.api.nvim_exec2
 --- @see vim.api.nvim_command
---- @param cmd vim.api.keyset.cmd Command to execute. Must be a Dict that can contain the same values as
---- the return value of `nvim_parse_cmd()` except "addr", "nargs" and "nextcmd"
---- which are ignored if provided. All values except for "cmd" are optional.
+--- @see vim.api.nvim_exec2
+--- @see vim.api.nvim_parse_cmd
+--- @param cmd vim.api.keyset.cmd Command to execute, a Dict with the same structure as the return value of
+--- `nvim_parse_cmd()` (except "addr", "nargs" and "nextcmd" are ignored).
+--- All keys except "cmd" are optional.
 --- @param opts vim.api.keyset.cmd_opts Optional parameters.
 --- - output: (boolean, default false) Whether to return command output.
 --- @return string # Command output (non-error, non-shell |:!|) if `output` is true, else empty string.
@@ -899,16 +900,15 @@ function vim.api.nvim_command_output(command) end
 ---
 --- ```lua
 --- local id = vim.api.nvim_create_augroup('my.lsp.config', {
----     clear = false
+---   clear = false
 --- })
 --- ```
 ---
 --- @see `:help autocmd-groups`
---- @param name string String: The name of the group
---- @param opts vim.api.keyset.create_augroup Dict Parameters
---- - clear (bool) optional: defaults to true. Clear existing
---- commands if the group already exists `autocmd-groups`.
---- @return integer # Integer id of the created group.
+--- @param name string Group name
+--- @param opts vim.api.keyset.create_augroup Optional parameters:
+--- - clear (`boolean?`, default: true) Clear existing commands in the group `autocmd-groups`.
+--- @return integer # Group id.
 function vim.api.nvim_create_augroup(name, opts) end
 
 --- Creates an `autocommand` event handler, defined by `callback` (Lua function or Vimscript
@@ -945,28 +945,24 @@ function vim.api.nvim_create_augroup(name, opts) end
 --- @see vim.api.nvim_del_autocmd
 --- @param event vim.api.keyset.events|vim.api.keyset.events[] Event(s) that will trigger the handler (`callback` or `command`).
 --- @param opts vim.api.keyset.create_autocmd Options dict:
---- - group (string|integer) optional: autocommand group name or id to match against.
---- - pattern (string|array) optional: pattern(s) to match literally `autocmd-pattern`.
---- - buffer (integer) optional: buffer number for buffer-local autocommands
---- `autocmd-buflocal`. Cannot be used with {pattern}.
---- - desc (string) optional: description (for documentation and troubleshooting).
---- - callback (function|string) optional: Lua function (or Vimscript function name, if
---- string) called when the event(s) is triggered. Lua callback can return a truthy
---- value (not `false` or `nil`) to delete the autocommand, and receives one argument, a
---- table with these keys: [event-args]()
----     - id: (number) autocommand id
----     - event: (vim.api.keyset.events) name of the triggered event `autocmd-events`
----     - group: (number|nil) autocommand group id, if any
----     - file: (string) [<afile>] (not expanded to a full path)
----     - match: (string) [<amatch>] (expanded to a full path)
----     - buf: (number) [<abuf>]
----     - data: (any) arbitrary data passed from [nvim_exec_autocmds()] [event-data]()
---- - command (string) optional: Vim command to execute on event. Cannot be used with
---- {callback}
---- - once (boolean) optional: defaults to false. Run the autocommand
---- only once `autocmd-once`.
---- - nested (boolean) optional: defaults to false. Run nested
---- autocommands `autocmd-nested`.
+--- - buffer (`integer?`) Buffer id for buffer-local autocommands `autocmd-buflocal`.
+---   Not allowed with {pattern}.
+--- - callback (`function|string?`) Lua function (or Vimscript function name, if string)
+---   called when the event(s) is triggered. Lua callback can return `lua-truthy` to delete
+---   the autocommand. Callback receives one argument, a table with keys: [event-args]()
+---     - id: (`number`) Autocommand id
+---     - event: (`vim.api.keyset.events`) Name of the triggered event `autocmd-events`
+---     - group: (`number?`) Group id, if any
+---     - file: (`string`) [<afile>] (not expanded to a full path)
+---     - match: (`string`) [<amatch>] (expanded to a full path)
+---     - buf: (`number`) [<abuf>]
+---     - data: (`any`) Arbitrary data passed from [nvim_exec_autocmds()] [event-data]()
+--- - command (string?) Vim command executed on event. Not allowed with {callback}.
+--- - desc (`string?`) Description (for documentation and troubleshooting).
+--- - group (`string|integer?`) Group name or id to match against.
+--- - nested (`boolean?`, default: false) Run nested autocommands `autocmd-nested`.
+--- - once (`boolean?`, default: false) Handle the event only once `autocmd-once`.
+--- - pattern (`string|array?`) Pattern(s) to match literally `autocmd-pattern`.
 --- @return integer # Autocommand id (number)
 function vim.api.nvim_create_autocmd(event, opts) end
 
@@ -1042,7 +1038,7 @@ function vim.api.nvim_create_user_command(name, command, opts) end
 --- this group will also be deleted and cleared. This group will no longer exist.
 --- @see vim.api.nvim_del_augroup_by_name
 --- @see vim.api.nvim_create_augroup
---- @param id integer Integer The id of the group.
+--- @param id integer Group id.
 function vim.api.nvim_del_augroup_by_id(id) end
 
 --- Delete an autocommand group by name.
@@ -1050,12 +1046,12 @@ function vim.api.nvim_del_augroup_by_id(id) end
 --- NOTE: behavior differs from `:augroup-delete`. When deleting a group, autocommands contained in
 --- this group will also be deleted and cleared. This group will no longer exist.
 --- @see `:help autocmd-groups`
---- @param name string String The name of the group.
+--- @param name string Group name.
 function vim.api.nvim_del_augroup_by_name(name) end
 
 --- Deletes an autocommand by id.
 ---
---- @param id integer Integer Autocommand id returned by `nvim_create_autocmd()`
+--- @param id integer Autocommand id returned by `nvim_create_autocmd()`
 function vim.api.nvim_del_autocmd(id) end
 
 --- Deletes the current line.
@@ -1092,7 +1088,13 @@ function vim.api.nvim_del_user_command(name) end
 --- @param name string Variable name
 function vim.api.nvim_del_var(name) end
 
---- Prints a message given by a list of `[text, hl_group]` "chunks".
+--- Prints a message given by a list of `[text, hl_group]` "chunks". Emits a `Progress` event if
+--- `kind='progress'`.
+---
+--- Returns a message-id, which can be given in later calls to update an existing message. The
+--- message-id is an autogenerated integer, or a user-defined string. The id "address space" is
+--- global, so plugins specifying a string id should use qualified names such as "my.msg.id" to
+--- avoid unintentional conflicts.
 ---
 --- Example:
 --- ```lua
@@ -1103,23 +1105,24 @@ function vim.api.nvim_del_var(name) end
 --- the (optional) name or ID `hl_group`.
 --- @param history boolean if true, add to `message-history`.
 --- @param opts vim.api.keyset.echo_opts Optional parameters.
---- - id: message id for updating existing message.
---- - err: Treat the message like `:echoerr`. Sets `hl_group` to `hl-ErrorMsg` by default.
---- - kind: Set the `ui-messages` kind with which this message will be emitted.
---- - verbose: Message is controlled by the 'verbose' option. Nvim invoked with `-V3log`
----   will write the message to the "log" file instead of standard output.
---- - title: The title for `progress-message`.
---- - status: Current status of the `progress-message`. Can be
----   one of the following values
----   - success: The progress item completed successfully
----   - running: The progress is ongoing
----   - failed: The progress item failed
----   - cancel: The progressing process should be canceled. NOTE: Cancel must be handled by
----     progress initiator by listening for the `Progress` event
---- - percent: How much progress is done on the progress message
---- - data: dictionary containing additional information
---- @return integer|string # Message id.
---- - -1 means nvim_echo didn't show a message
+--- - data (`table?`) Dict of arbitrary data, available in `Progress` `event-data`.
+--- - err (`boolean?`)  Treat the message like `:echoerr`. Sets `hl_group` to `hl-ErrorMsg` by default.
+--- - id (`integer|string?`) Message-id returned by a previous `nvim_echo` call, or
+---   a user-defined id (string). If existing message has this id, it will be updated
+---   instead of creating a new message.
+--- - kind (`string?`) Decides the `ui-messages` kind in the emitted message. Set "progress"
+---   to emit a `progress-message`.
+--- - percent (`integer?`) `progress-message` percentage.
+--- - status (`string?`) `progress-message` status:
+---   - "success": Process completed successfully.
+---   - "running": Process is ongoing.
+---   - "failed": Process failed.
+---   - "cancel": Process should be cancelled. Progress owner must handle the `Progress`
+---     event to perform the cancellation.
+--- - title (`string?`) Message title. Only for `progress-message` currently.
+--- - verbose (`boolean?`) Message is controlled by the 'verbose' option. `nvim -V3log` will write the
+---   message to the "log" file instead of standard output.
+--- @return integer|string # Message-id, or -1 if message wasn't shown.
 function vim.api.nvim_echo(chunks, history, opts) end
 
 --- @deprecated
@@ -1189,21 +1192,16 @@ function vim.api.nvim_exec(src, output) end
 --- - output: (string|nil) Output if `opts.output` is true.
 function vim.api.nvim_exec2(src, opts) end
 
---- Execute all autocommands for {event} that match the corresponding
----  {opts} `autocmd-execute`.
+--- Executes handlers for {event} that match the corresponding {opts} query. `autocmd-execute`
 --- @see `:help :doautocmd`
---- @param event vim.api.keyset.events|vim.api.keyset.events[] The event or events to execute
---- @param opts vim.api.keyset.exec_autocmds Dict of autocommand options:
---- - group (string|integer) optional: the autocommand group name or
---- id to match against. `autocmd-groups`.
---- - pattern (string|array) optional: defaults to "*" `autocmd-pattern`. Cannot be used
---- with {buffer}.
---- - buffer (integer) optional: buffer number `autocmd-buflocal`. Cannot be used with
---- {pattern}.
---- - modeline (bool) optional: defaults to true. Process the
---- modeline after the autocommands [<nomodeline>].
---- - data (any): arbitrary data to send to the autocommand callback. See
---- `nvim_create_autocmd()` for details.
+--- @param event vim.api.keyset.events|vim.api.keyset.events[] Event(s) to execute.
+--- @param opts vim.api.keyset.exec_autocmds Optional filters:
+--- - group (`string|integer?`) Group name or id to match against. `autocmd-groups`.
+--- - pattern (`string|array?`, default: "*") `autocmd-pattern`. Not allowed with {buffer}.
+--- - buffer (`integer?`) Buffer id `autocmd-buflocal`. Not allowed with {pattern}.
+--- - modeline (`boolean?`, default: true) Process the modeline after the autocommands
+---   [<nomodeline>].
+--- - data (`any`): Arbitrary data passed to the callback. See `nvim_create_autocmd()`.
 function vim.api.nvim_exec_autocmds(event, opts) end
 
 --- Sends input-keys to Nvim, subject to various quirks controlled by `mode`
@@ -1241,9 +1239,12 @@ function vim.api.nvim_feedkeys(keys, mode, escape_ks) end
 --- @return table<string,any> # dict of all options
 function vim.api.nvim_get_all_options_info() end
 
---- Get all autocommands that match the corresponding {opts}.
+--- Gets all autocommands matching ALL criteria in the {opts} query.
 ---
---- These examples will get autocommands matching ALL the given criteria:
+--- Note: When multiple patterns or events are provided they have "OR" semantics (any combination
+--- is matched).
+---
+--- Examples:
 ---
 --- ```lua
 --- -- Matches all criteria
@@ -1259,33 +1260,25 @@ function vim.api.nvim_get_all_options_info() end
 --- })
 --- ```
 ---
---- NOTE: When multiple patterns or events are provided, it will find all the autocommands that
---- match any combination of them.
----
---- @param opts vim.api.keyset.get_autocmds Dict with at least one of the following:
---- - buffer: (integer) Buffer number or list of buffer numbers for buffer local autocommands
---- `autocmd-buflocal`. Cannot be used with {pattern}
---- - event: (vim.api.keyset.events|vim.api.keyset.events[])
----   event or events to match against `autocmd-events`.
---- - id: (integer) Autocommand ID to match.
---- - group: (string|table) the autocommand group name or id to match against.
---- - pattern: (string|table) pattern or patterns to match against `autocmd-pattern`.
---- Cannot be used with {buffer}
---- @return vim.api.keyset.get_autocmds.ret[] # Array of autocommands matching the criteria, with each item
---- containing the following fields:
---- - buffer: (integer) the buffer number.
---- - buflocal: (boolean) true if the autocommand is buffer local.
---- - command: (string) the autocommand command. Note: this will be empty if a callback is set.
---- - callback: (function|string|nil): Lua function or name of a Vim script function
----   which is executed when this autocommand is triggered.
---- - desc: (string) the autocommand description.
---- - event: (vim.api.keyset.events) the autocommand event.
---- - id: (integer) the autocommand id (only when defined with the API).
---- - group: (integer) the autocommand group id.
---- - group_name: (string) the autocommand group name.
---- - once: (boolean) whether the autocommand is only run once.
---- - pattern: (string) the autocommand pattern.
----   If the autocommand is buffer local |autocmd-buffer-local|:
+--- @param opts vim.api.keyset.get_autocmds Dict with at least one of these keys:
+--- - buffer: (`integer[]|integer?`) Buffer id or list of buffer ids, for buffer-local autocommands
+---   `autocmd-buflocal`. Not allowed with {pattern}.
+--- - event: (`vim.api.keyset.events|vim.api.keyset.events[]?`) Event(s) to match `autocmd-events`.
+--- - group: (`string|table?`) Group name or id to match.
+--- - id: (`integer?`) Autocommand ID to match.
+--- - pattern: (`string|table?`) Pattern(s) to match `autocmd-pattern`. Not allowed with {buffer}.
+--- @return vim.api.keyset.get_autocmds.ret[] # Array of matching autocommands, where each item has:
+--- - buffer (`integer?`): Buffer id (only for |autocmd-buffer-local|).
+--- - buflocal (`boolean?`): true if the autocommand is buffer-local |autocmd-buffer-local|.
+--- - callback: (`function|string?`): Event handler: a Lua function or Vimscript function name.
+--- - command: (`string`) Event handler: an Ex-command. Empty if a `callback` is set.
+--- - desc: (`string`) Description.
+--- - event: (`vim.api.keyset.events`) Event name(s).
+--- - group: (`integer`) Group id.
+--- - group_name: (`string`) Group name.
+--- - id: (`integer`) Autocommand id (only when defined with the API).
+--- - once: (`boolean`) true if |autocmd-once| was set.
+--- - pattern: (`string`) Autocommand pattern.
 function vim.api.nvim_get_autocmds(opts) end
 
 --- Gets information about a channel.
@@ -1301,16 +1294,17 @@ function vim.api.nvim_get_autocmds(opts) end
 ---      - "stderr"     stderr of this Nvim instance
 ---      - "socket"     TCP/IP socket or named pipe
 ---      - "job"        Job with communication over its stdio.
---- -  "mode"    How data received on the channel is interpreted.
+--- - "mode"     How data received on the channel is interpreted.
 ---      - "bytes"      Send and receive raw bytes.
 ---      - "terminal"   |terminal| instance interprets ASCII sequences.
 ---      - "rpc"        |RPC| communication on the channel is active.
---- -  "pty"     (optional) Name of pseudoterminal. On a POSIX system this is a device path like
+--- - "pty"      (optional) Name of pseudoterminal. On a POSIX system this is a device path like
 ---              "/dev/pts/1". If unknown, the key will still be present if a pty is used (e.g.
 ---              for conpty on Windows).
---- -  "buffer"  (optional) Buffer connected to |terminal| instance.
---- -  "client"  (optional) Info about the peer (client on the other end of the channel), as set
+--- - "buffer"   (optional) Buffer connected to |terminal| instance.
+--- - "client"   (optional) Info about the peer (client on the other end of the channel), as set
 ---              by |nvim_set_client_info()|.
+--- - "exitcode" (optional) Exit code of the |terminal| process.
 ---
 function vim.api.nvim_get_chan_info(chan) end
 
@@ -1667,6 +1661,17 @@ function vim.api.nvim_load_context(dict) end
 --- @return any
 function vim.api.nvim_notify(msg, log_level, opts) end
 
+--- Opens a new tabpage.
+---
+--- @param buffer integer Buffer to open in the first window of the new tabpage.
+--- Use 0 for current buffer.
+--- @param enter boolean Enter the tabpage (make it the current tabpage).
+--- @param config vim.api.keyset.tabpage_config Configuration for the new tabpage. Keys:
+--- - after: Position to insert tabpage (default: -1; after current).
+---          0 = first, N = after Nth.
+--- @return integer # |tab-ID| of the new tabpage
+function vim.api.nvim_open_tabpage(buffer, enter, config) end
+
 --- Open a terminal instance in a buffer
 ---
 --- By default (and currently the only option) the terminal will not be
@@ -1704,26 +1709,19 @@ function vim.api.nvim_notify(msg, log_level, opts) end
 --- @return integer # Channel id, or 0 on error
 function vim.api.nvim_open_term(buffer, opts) end
 
---- Opens a new split window, or a floating window if `relative` is specified,
---- or an external window (managed by the UI) if `external` is specified.
+--- Opens a new split window, floating window, or external window.
 ---
---- Floats are windows that are drawn above the split layout, at some anchor
---- position in some other window. Floats can be drawn internally or by external
---- GUI with the `ui-multigrid` extension. External windows are only supported
---- with multigrid GUIs, and are displayed as separate top-level windows.
----
---- For a general overview of floats, see `api-floatwin`.
----
---- The `width` and `height` of the new window must be specified when opening
---- a floating window, but are optional for normal windows.
----
---- If `relative` and `external` are omitted, a normal "split" window is created.
---- The `win` property determines which window will be split. If no `win` is
---- provided or `win == 0`, a window will be created adjacent to the current window.
---- If -1 is provided, a top-level split will be created. `vertical` and `split` are
---- only valid for normal windows, and are used to control split direction. For `vertical`,
---- the exact direction is determined by 'splitright' and 'splitbelow'.
---- Split windows cannot have `bufpos`, `row`, `col`, `border`, `title`, `footer` properties.
+--- - Specify `relative` to create a floating window. Floats are drawn over the split layout,
+---   relative to a position in some other window. See `api-floatwin`.
+---   - Floats must specify `width` and `height`.
+--- - Specify `external` to create an external window. External windows are displayed as separate
+---   top-level windows managed by the `ui-multigrid` UI (not Nvim).
+--- - If `relative` and `external` are omitted, a normal "split" window is created.
+---   - The `win` key decides which window to split. If nil or 0, the split will be adjacent to
+---     the current window. If -1, a top-level split will be created.
+---   - Use `vertical` and `split` to control split direction. For `vertical`, the exact direction
+---     is determined by 'splitright' and 'splitbelow'.
+---   - Split windows cannot have `bufpos`, `row`, `col`, `border`, `title`, `footer`.
 ---
 --- With relative=editor (row=0,col=0) refers to the top-left corner of the
 --- screen-grid and (row=Lines-1,col=Columns-1) refers to the bottom-right
@@ -1829,8 +1827,8 @@ function vim.api.nvim_open_term(buffer, opts) end
 ---    - "win"        Window given by the `win` field, or current window.
 --- - row: Row position in units of "screen cell height", may be fractional.
 --- - split: Split direction: "left", "right", "above", "below".
---- - style: (optional) Configure the appearance of the window. Currently
----     only supports one value:
+--- - style: (optional) Configure the appearance of the window:
+---     - ""         No special style.
 ---     - "minimal"  Nvim will display the window with many UI options
 ---                  disabled. This is useful when displaying a temporary
 ---                  float where the text should not be edited. Disables
@@ -1849,8 +1847,9 @@ function vim.api.nvim_open_term(buffer, opts) end
 ---     Default is `"left"`.
 --- - vertical: Split vertically `:vertical`.
 --- - width: Window width (in character cells). Minimum of 1.
---- - win: `window-ID` window to split, or relative window when creating a
----    float (relative="win").
+--- - win: `window-ID` target window. Can be in a different tab page. Determines the window to
+---     split (negative values act like `:topleft`, `:botright`), the relative window for a
+---     `relative="win"` float, or just the target tab page (inferred from the window) for others.
 --- - zindex: Stacking order. floats with higher `zindex` go on top on
 ---             floats with lower indices. Must be larger than zero. The
 ---             following screen elements have hard-coded z-indices:
@@ -2021,7 +2020,7 @@ function vim.api.nvim_parse_expression(expr, flags, highlight) end
 ---     line2
 ---     line3
 ---   ]], false, -1)
---- end, { buffer = true })
+--- end, { buf = true })
 --- ```
 ---
 --- @param data string Multiline input. Lines break at LF ("\n"). May be binary (containing NUL bytes).
@@ -2189,7 +2188,6 @@ function vim.api.nvim_set_decoration_provider(ns_id, opts) end
 --- values of the Normal group. If the Normal group has not been defined,
 --- using these values results in an error.
 ---
----
 --- If `link` is used in combination with other attributes; only the
 --- `link` will take effect (see |:hi-link|).
 ---
@@ -2200,34 +2198,35 @@ function vim.api.nvim_set_decoration_provider(ns_id, opts) end
 --- `nvim_set_hl_ns()` or `nvim_win_set_hl_ns()` to activate them.
 --- @param name string Highlight group name, e.g. "ErrorMsg"
 --- @param val vim.api.keyset.highlight Highlight definition map, accepts the following keys:
---- - fg: color name or "#RRGGBB", see note.
 --- - bg: color name or "#RRGGBB", see note.
---- - fg_indexed: boolean
----   When true, fg is a terminal palette index (0-255).
----   Default is false.
---- - bg_indexed: boolean
----   Same as fg_indexed, but for background color.
---- - sp: color name or "#RRGGBB"
+--- - bg_indexed: boolean (default false) If true, bg is a terminal palette index (0-255).
 --- - blend: integer between 0 and 100
---- - bold: boolean
---- - standout: boolean
---- - underline: boolean
---- - undercurl: boolean
---- - underdouble: boolean
---- - underdotted: boolean
---- - underdashed: boolean
---- - strikethrough: boolean
---- - italic: boolean
---- - reverse: boolean
---- - nocombine: boolean
---- - link: name of another highlight group to link to, see `:hi-link`.
---- - default: Don't override existing definition `:hi-default`
---- - ctermfg: Sets foreground of cterm color `ctermfg`
+--- - cterm: cterm attribute map, like `highlight-args`. If not set, cterm attributes
+---   will match those from the attribute map documented above.
 --- - ctermbg: Sets background of cterm color `ctermbg`
---- - cterm: cterm attribute map, like `highlight-args`. If not set,
----          cterm attributes will match those from the attribute map
----          documented above.
+--- - ctermfg: Sets foreground of cterm color `ctermfg`
+--- - default: boolean Don't override existing definition `:hi-default`
+--- - fg: color name or "#RRGGBB", see note.
+--- - fg_indexed: boolean (default false) If true, fg is a terminal palette index (0-255).
 --- - force: if true force update the highlight group when it exists.
+--- - link: Name of highlight group to link to. `:hi-link`
+--- - sp: color name or "#RRGGBB"
+--- - altfont: boolean
+--- - blink: boolean
+--- - bold: boolean
+--- - conceal: boolean Concealment at the UI level (terminal SGR), unrelated to `:syn-conceal`.
+--- - dim: boolean
+--- - italic: boolean
+--- - nocombine: boolean
+--- - overline: boolean
+--- - reverse: boolean
+--- - standout: boolean
+--- - strikethrough: boolean
+--- - undercurl: boolean
+--- - underdashed: boolean
+--- - underdotted: boolean
+--- - underdouble: boolean
+--- - underline: boolean
 function vim.api.nvim_set_hl(ns_id, name, val) end
 
 --- Set active namespace for highlights defined with `nvim_set_hl()`. This can be set for
@@ -2486,17 +2485,20 @@ function vim.api.nvim_win_hide(window) end
 --- @return boolean # true if the window is valid, false otherwise
 function vim.api.nvim_win_is_valid(window) end
 
---- Sets the current buffer in a window, without side effects
+--- Sets the current buffer in a window.
 ---
+--- Note: As a side-effect, this executes `BufEnter` and `BufLeave` autocommands.
 --- @param window integer `window-ID`, or 0 for current window
 --- @param buffer integer Buffer id
 function vim.api.nvim_win_set_buf(window, buffer) end
 
---- Reconfigures the layout of a window.
+--- Reconfigures the layout and properties of a window.
 ---
---- - Absent (`nil`) keys will not be changed.
---- - `row` / `col` / `relative` must be reconfigured together.
---- - Cannot be used to move the last window in a tabpage to a different one.
+--- - Updates only the given keys; unspecified (`nil`) keys will not be changed.
+--- - Can move a window to another tabpage.
+--- - Can transform a window to/from a float.
+--- - Keys `row` / `col` / `relative` must be specified together.
+--- - Cannot move the last window in a tabpage to a different one.
 ---
 --- Example: to convert a floating window to a "normal" split window, specify the `win` field:
 ---
@@ -2510,7 +2512,7 @@ function vim.api.nvim_win_set_buf(window, buffer) end
 --- @param config vim.api.keyset.win_config Map defining the window configuration, see [nvim_open_win()]
 function vim.api.nvim_win_set_config(window, config) end
 
---- Sets the (1,0)-indexed cursor position in the window. `api-indexing`
+--- Sets the (1,0)-indexed cursor position (byte offset) in the window. `api-indexing`
 --- This scrolls the window even if it is not the current one.
 ---
 --- @param window integer `window-ID`, or 0 for current window

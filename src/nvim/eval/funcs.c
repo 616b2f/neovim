@@ -2168,17 +2168,19 @@ static void f_getpos(typval_T *argvars, typval_T *rettv, EvalFuncData fptr)
 }
 
 /// Convert from block_def to string
-static char *block_def2str(struct block_def *bd)
+static String block_def2str(struct block_def *bd)
 {
   size_t size = (size_t)bd->startspaces + (size_t)bd->endspaces + (size_t)bd->textlen;
-  char *ret = xmalloc(size + 1);
-  char *p = ret;
-  memset(p, ' ', (size_t)bd->startspaces);
-  p += bd->startspaces;
-  memmove(p, bd->textstart, (size_t)bd->textlen);
-  p += bd->textlen;
-  memset(p, ' ', (size_t)bd->endspaces);
-  *(p + bd->endspaces) = NUL;
+  String ret = { .data = xmalloc(size + 1) };
+
+  memset(ret.data, ' ', (size_t)bd->startspaces);
+  ret.size += (size_t)bd->startspaces;
+  memmove(ret.data + ret.size, bd->textstart, (size_t)bd->textlen);
+  ret.size += (size_t)bd->textlen;
+  memset(ret.data + ret.size, ' ', (size_t)bd->endspaces);
+  ret.size += (size_t)bd->endspaces;
+  ret.data[ret.size] = NUL;
+
   return ret;
 }
 
@@ -2333,24 +2335,22 @@ static void f_getregion(typval_T *argvars, typval_T *rettv, EvalFuncData fptr)
   }
 
   for (linenr_T lnum = p1.lnum; lnum <= p2.lnum; lnum++) {
-    char *akt = NULL;
+    String akt = STRING_INIT;
 
-    if (region_type == kMTLineWise) {
-      akt = xstrdup(ml_get(lnum));
-    } else if (region_type == kMTBlockWise) {
+    if (region_type == kMTBlockWise) {
       struct block_def bd;
       block_prep(&oa, &bd, lnum, false);
       akt = block_def2str(&bd);
-    } else if (p1.lnum < lnum && lnum < p2.lnum) {
-      akt = xstrdup(ml_get(lnum));
+    } else if (region_type == kMTLineWise || (p1.lnum < lnum && lnum < p2.lnum)) {
+      akt = cbuf_to_string(ml_get(lnum), (size_t)ml_get_len(lnum));
     } else {
       struct block_def bd;
       charwise_block_prep(p1, p2, &bd, lnum, inclusive);
       akt = block_def2str(&bd);
     }
 
-    assert(akt != NULL);
-    tv_list_append_allocated_string(rettv->vval.v_list, akt);
+    assert(akt.data != NULL);
+    tv_list_append_allocated_string(rettv->vval.v_list, akt.data);
   }
 
   // getregionpos() may change curbuf and virtual_op
@@ -2661,6 +2661,9 @@ static void f_gettext(typval_T *argvars, typval_T *rettv, EvalFuncData fptr)
 static void f_has(typval_T *argvars, typval_T *rettv, EvalFuncData fptr)
 {
   static const char *const has_list[] = {
+#ifdef __ANDROID__
+    "android",
+#endif
 #if defined(BSD) && !defined(__APPLE__) && !defined(__GNU__)
     "bsd",
 #endif
@@ -2672,6 +2675,9 @@ static void f_has(typval_T *argvars, typval_T *rettv, EvalFuncData fptr)
 #endif
 #ifdef SUN_SYSTEM
     "sun",
+#endif
+#ifdef __TERMUX__
+    "termux",
 #endif
 #ifdef UNIX
     "unix",
@@ -2791,70 +2797,89 @@ static void f_has(typval_T *argvars, typval_T *rettv, EvalFuncData fptr)
     "nvim",
   };
 
-  // XXX: eval_has_provider() may shell out :(
-  const int save_shell_error = (int)get_vim_var_nr(VV_SHELL_ERROR);
+  bool x = false;
   bool n = false;
   const char *const name = tv_get_string(&argvars[0]);
-  for (size_t i = 0; i < ARRAY_SIZE(has_list); i++) {
-    if (STRICMP(name, has_list[i]) == 0) {
-      n = true;
-      break;
+
+  // Fast-path: check features not in has_list[] first to avoid the full
+  // linear scan for very common queries like has('patch-...').
+  if (STRNICMP(name, "patch", 5) == 0) {
+    x = true;
+    if (name[5] == '-'
+        && strlen(name) >= 11
+        && (name[6] >= '1' && name[6] <= '9')) {
+      char *end;
+
+      // This works for patch-8.1.2, patch-9.0.3, patch-10.0.4, etc.
+      // Not for patch-9.10.5.
+      int major = (int)strtoul(name + 6, &end, 10);
+      if (*end == '.' && ascii_isdigit(end[1])
+          && end[2] == '.' && ascii_isdigit(end[3])) {
+        int minor = atoi(end + 1);
+
+        // Expect "patch-9.9.01234".
+        n = has_vim_patch(atoi(end + 3), major * 100 + minor);
+      }
+    } else if (ascii_isdigit(name[5])) {
+      n = has_vim_patch(atoi(name + 5), 0);
+    }
+  } else if (STRNICMP(name, "nvim-", 5) == 0) {
+    x = true;
+    // Expect "nvim-x.y.z"
+    n = has_nvim_version(name + 5);
+  } else if (STRICMP(name, "vim_starting") == 0) {
+    x = true;
+    n = (starting != 0);
+  } else if (STRICMP(name, "ttyin") == 0) {
+    x = true;
+    n = stdin_isatty;
+  } else if (STRICMP(name, "ttyout") == 0) {
+    x = true;
+    n = stdout_isatty;
+  } else if (STRICMP(name, "multi_byte_encoding") == 0) {
+    x = true;
+    n = true;
+  } else if (STRICMP(name, "gui_running") == 0) {
+    x = true;
+    n = ui_gui_attached();
+  } else if (STRICMP(name, "syntax_items") == 0) {
+    x = true;
+    n = syntax_present(curwin);
+  } else if (STRICMP(name, "wsl") == 0) {
+    x = true;
+    n = has_wsl();
+  }
+
+  // Look up in has_list[] only if not already handled above.
+  if (!x) {
+    for (size_t i = 0; i < ARRAY_SIZE(has_list); i++) {
+      if (STRICMP(name, has_list[i]) == 0) {
+        x = true;
+        n = true;
+        break;
+      }
     }
   }
 
-  if (!n) {
-    if (STRNICMP(name, "gui_running", 11) == 0) {
-      n = ui_gui_attached();
-    } else if (STRNICMP(name, "patch", 5) == 0) {
-      if (name[5] == '-'
-          && strlen(name) >= 11
-          && (name[6] >= '1' && name[6] <= '9')) {
-        char *end;
+  if (!x) {
+    // XXX: eval_has_provider() may shell out :(
+    const int save_shell_error = (int)get_vim_var_nr(VV_SHELL_ERROR);
 
-        // This works for patch-8.1.2, patch-9.0.3, patch-10.0.4, etc.
-        // Not for patch-9.10.5.
-        int major = (int)strtoul(name + 6, &end, 10);
-        if (*end == '.' && ascii_isdigit(end[1])
-            && end[2] == '.' && ascii_isdigit(end[3])) {
-          int minor = atoi(end + 1);
-
-          // Expect "patch-9.9.01234".
-          n = has_vim_patch(atoi(end + 3), major * 100 + minor);
-        }
-      } else if (ascii_isdigit(name[5])) {
-        n = has_vim_patch(atoi(name + 5), 0);
-      }
-    } else if (STRNICMP(name, "nvim-", 5) == 0) {
-      // Expect "nvim-x.y.z"
-      n = has_nvim_version(name + 5);
-    } else if (STRICMP(name, "vim_starting") == 0) {
-      n = (starting != 0);
-    } else if (STRICMP(name, "ttyin") == 0) {
-      n = stdin_isatty;
-    } else if (STRICMP(name, "ttyout") == 0) {
-      n = stdout_isatty;
-    } else if (STRICMP(name, "multi_byte_encoding") == 0) {
-      n = true;
-    } else if (STRICMP(name, "syntax_items") == 0) {
-      n = syntax_present(curwin);
-    } else if (STRICMP(name, "clipboard_working") == 0) {
+    if (STRICMP(name, "clipboard_working") == 0) {
       n = eval_has_provider("clipboard", true);
-    } else if (STRICMP(name, "pythonx") == 0) {
-      n = eval_has_provider("python3", true);
-    } else if (STRICMP(name, "wsl") == 0) {
-      n = has_wsl();
 #ifdef UNIX
     } else if (STRICMP(name, "unnamedplus") == 0) {
       n = eval_has_provider("clipboard", true);
 #endif
+    } else if (STRICMP(name, "pythonx") == 0) {
+      n = eval_has_provider("python3", true);
+    } else if (eval_has_provider(name, true)) {
+      n = true;
     }
+
+    set_vim_var_nr(VV_SHELL_ERROR, save_shell_error);
   }
 
-  if (!n && eval_has_provider(name, true)) {
-    n = true;
-  }
-
-  set_vim_var_nr(VV_SHELL_ERROR, save_shell_error);
   rettv->vval.v_number = n;
 }
 
@@ -3618,6 +3643,8 @@ void f_jobstart(typval_T *argvars, typval_T *rettv, EvalFuncData fptr)
     const int pid = chan->stream.pty.proc.pid;
     buf_T *const buf = curbuf;
 
+    // Unset 'swapfile' to ensure no swapfile is created.
+    buf->b_p_swf = false;
     // If the buffer isn't loaded, open a memfile here to avoid spurious autocommands
     // from open_buffer() when updating the terminal buffer later.
     if (buf->b_ml.ml_mfp == NULL && ml_open(buf) == FAIL) {
@@ -3653,8 +3680,6 @@ void f_jobstart(typval_T *argvars, typval_T *rettv, EvalFuncData fptr)
 
     // Terminal URI: "term://$CWD//$PID:$CMD"
     snprintf(NameBuff, sizeof(NameBuff), "term://%s//%d:%s", IObuff, pid, cmd);
-    // Unset 'swapfile' to ensure no swapfile is created.
-    buf->b_p_swf = false;
 
     setfname(buf, NameBuff, NULL, true);
     apply_autocmds(EVENT_BUFFILEPOST, NULL, NULL, false, buf);
@@ -6956,12 +6981,18 @@ static void f_spellbadword(typval_T *argvars, typval_T *rettv, EvalFuncData fptr
   assert(len <= INT_MAX);
   tv_list_alloc_ret(rettv, 2);
   tv_list_append_string(rettv->vval.v_list, word, (ssize_t)len);
-  tv_list_append_string(rettv->vval.v_list,
-                        (attr == HLF_SPB
-                         ? "bad" : (attr == HLF_SPR
-                                    ? "rare" : (attr == HLF_SPL
-                                                ? "local" : (attr == HLF_SPC
-                                                             ? "caps" : NULL)))), -1);
+  switch (attr) {
+  case HLF_SPB:
+    tv_list_append_string(rettv->vval.v_list, S_LEN("bad")); break;
+  case HLF_SPR:
+    tv_list_append_string(rettv->vval.v_list, S_LEN("rare")); break;
+  case HLF_SPL:
+    tv_list_append_string(rettv->vval.v_list, S_LEN("local")); break;
+  case HLF_SPC:
+    tv_list_append_string(rettv->vval.v_list, S_LEN("caps")); break;
+  default:
+    tv_list_append_string(rettv->vval.v_list, NULL, -1); break;
+  }
 }
 
 /// "spellsuggest()" function
@@ -7378,9 +7409,20 @@ static void f_synIDattr(typval_T *argvars, typval_T *rettv, EvalFuncData fptr)
   case 'b':
     if (TOLOWER_ASC(what[1]) == 'g') {  // bg[#]
       p = highlight_color(id, what, modec);
+    } else if (TOLOWER_ASC(what[1]) == 'l') {  // blink
+      p = highlight_has_attr(id, HL_BLINK, modec);
     } else {  // bold
       p = highlight_has_attr(id, HL_BOLD, modec);
     }
+    break;
+  case 'c':    // conceal
+    p = highlight_has_attr(id, HL_CONCEALED, modec);
+    break;
+  case 'd':    // dim
+    p = highlight_has_attr(id, HL_DIM, modec);
+    break;
+  case 'o':    // overline
+    p = highlight_has_attr(id, HL_OVERLINE, modec);
     break;
   case 'f':    // fg[#] or font
     p = highlight_color(id, what, modec);

@@ -1,5 +1,6 @@
 local t = require('test.testutil')
 local n = require('test.functional.testnvim')()
+local tt = require('test.functional.testterm')
 local Screen = require('test.functional.ui.screen')
 
 local assert_alive = n.assert_alive
@@ -14,6 +15,8 @@ local exec_lua = n.exec_lua
 local eval = n.eval
 local sleep = vim.uv.sleep
 local pcall_err = t.pcall_err
+local testprg = n.testprg
+local expect_exitcode = tt.expect_exitcode
 
 local mousemodels = { 'extend', 'popup', 'popup_setpos' }
 
@@ -941,6 +944,7 @@ describe('default statusline', function()
     screen = Screen.new(60, 16)
     screen:add_extra_attr_ids {
       [100] = { foreground = Screen.colors.Magenta1, bold = true },
+      [131] = { foreground = Screen.colors.NvimDarkGreen },
     }
     command('set laststatus=2')
     command('set ruler')
@@ -949,27 +953,57 @@ describe('default statusline', function()
   it('setting statusline to empty string sets default statusline', function()
     exec_lua("vim.o.statusline = 'asdf'")
     eq('asdf', eval('&statusline'))
+    screen:expect([[
+      ^                                                            |
+      {1:~                                                           }|*13
+      {3:asdf                                                        }|
+                                                                  |
+    ]])
 
     local default_statusline = table.concat({
       '%<',
       '%f %h%w%m%r ',
+      "%{% v:lua.require('vim._core.util').term_exitcode() %}",
       '%=',
+      "%{% luaeval('(package.loaded[''vim.ui''] and vim.ui.progress_status()) or '''' ')%}",
       "%{% &showcmdloc == 'statusline' ? '%-10.S ' : '' %}",
       "%{% exists('b:keymap_name') ? '<'..b:keymap_name..'> ' : '' %}",
       "%{% &busy > 0 ? '◐ ' : '' %}",
-      "%{% luaeval('(package.loaded[''vim.diagnostic''] and #vim.diagnostic.count() ~= 0 and vim.diagnostic.status() .. '' '') or '''' ') %}",
+      "%{% luaeval('(package.loaded[''vim.diagnostic''] and next(vim.diagnostic.count()) and vim.diagnostic.status() .. '' '') or '''' ') %}",
       "%{% &ruler ? ( &rulerformat == '' ? '%-14.(%l,%c%V%) %P' : &rulerformat ) : '' %}",
     })
 
     exec_lua("vim.o.statusline = ''")
-
     eq(default_statusline, eval('&statusline'))
-
     screen:expect([[
       ^                                                            |
       {1:~                                                           }|*13
       {3:[No Name]                                 0,0-1          All}|
                                                                   |
+    ]])
+
+    -- Reset to default (via the correct scope) if there's an error.
+    command('setglobal statusline=%{a%}')
+    eq(default_statusline, eval('&statusline'))
+    eq(default_statusline, eval('&g:statusline'))
+    eq('', eval('&l:statusline'))
+    command('redrawstatus') -- like Vim, statusline isn't immediately redrawn after an error
+    screen:expect([[
+      ^                                                            |
+      {1:~                                                           }|*13
+      {3:[No Name]                                 0,0-1          All}|
+      {9:E121: Undefined variable: a}                                 |
+    ]])
+    command('setlocal statusline=%{b%}')
+    eq(default_statusline, eval('&statusline'))
+    eq(default_statusline, eval('&g:statusline'))
+    eq('', eval('&l:statusline'))
+    command('redrawstatus') -- like Vim, statusline isn't immediately redrawn after an error
+    screen:expect([[
+      ^                                                            |
+      {1:~                                                           }|*13
+      {3:[No Name]                                 0,0-1          All}|
+      {9:E121: Undefined variable: b}                                 |
     ]])
   end)
 
@@ -996,6 +1030,66 @@ describe('default statusline', function()
       {1:~                                                           }|*13
       {3:[No Name]                                 0,0-1          All}|
                                                                   |
+    ]])
+  end)
+
+  it('shows exit code when terminal exits #14986', function()
+    exec_lua("vim.o.statusline = ''")
+    api.nvim_set_option_value('shell', testprg('shell-test'), {})
+    api.nvim_set_option_value('shellcmdflag', 'EXIT', {})
+    api.nvim_set_option_value('shellxquote', '', {}) -- win: avoid extra quotes
+    command('terminal 9')
+    screen:expect({ any = '%[Exit: 9%]' })
+    expect_exitcode(9)
+  end)
+
+  it('shows and updates progress status', function()
+    exec_lua("vim.o.statusline = ''")
+    local function get_progress()
+      return exec_lua(function()
+        local stl_str = vim.ui.progress_status()
+        return vim.api.nvim_eval_statusline(stl_str, {}).str
+      end)
+    end
+
+    eq('', get_progress())
+    ---@type integer|string
+    local id1 = api.nvim_echo(
+      { { 'searching...' } },
+      true,
+      { kind = 'progress', title = 'test', status = 'running', percent = 10 }
+    )
+    eq('test: 10% ', get_progress())
+
+    api.nvim_echo(
+      { { 'searching' } },
+      true,
+      { id = id1, kind = 'progress', percent = 50, status = 'running', title = 'terminal(ripgrep)' }
+    )
+    eq('terminal(ripgrep): 50% ', get_progress())
+
+    api.nvim_echo(
+      { { 'searching...' } },
+      true,
+      { kind = 'progress', title = 'second-item', status = 'running', percent = 20 }
+    )
+    eq('Progress: 2 items 35% ', get_progress())
+
+    api.nvim_echo({ { 'searching' } }, true, {
+      id = id1,
+      kind = 'progress',
+      percent = 100,
+      status = 'success',
+      title = 'terminal(ripgrep)',
+    })
+    eq('second-item: 20% ', get_progress())
+
+    exec('redrawstatus')
+    screen:expect([[
+      ^                                                            |
+      {1:~                                                           }|*13
+      {3:[No Name]                second-item: 20% 0,0-1          All}|
+      {131:terminal(ripgrep)}: {19:100% }searching                           |
     ]])
   end)
 end)
@@ -1064,7 +1158,7 @@ describe("'statusline' in floatwin", function()
 
     -- no statusline is displayed because the statusline option was cleared
     api.nvim_win_set_config(win, cfg)
-    screen:expect(without_stl)
+    screen:expect_unchanged()
 
     -- displayed after the option is reset
     command(set_stl)
@@ -1090,6 +1184,19 @@ describe("'statusline' in floatwin", function()
     ]])
     command('tabfirst')
     api.nvim_win_set_config(win2, { style = 'minimal' })
+    screen:expect([[
+      {5: }{101:2}{5:+ [No Name] }{24: }{102:2}{24:+ [No Name] }{2: }{24:X}|
+       ┌──────────┐                 |
+      {1:~}│{4:^1         }│{1:                 }|
+      {1:~}│{4:2         }│{1:                 }|
+      {1:~}│{4:3         }│{1:                 }|
+      {1:~}│{4:4         }│{1:                 }|
+      {1:~}│{3:<Name] [+]}│{1:                 }|
+      {1:~}└──────────┘{1:                 }|
+      {1:~                             }|*10
+      {2:[No Name]                     }|
+                                    |
+    ]])
     command('tabnext')
     screen:expect([[
       {24: }{102:2}{24:+ [No Name] }{5: }{101:2}{5:+ [No Name] }{2: }{24:X}|

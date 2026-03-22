@@ -52,7 +52,7 @@
 #define NS_1_SECOND         1000000000U     // 1 second, in nanoseconds
 #define OUT_DATA_THRESHOLD  1024 * 10U      // 10KB, "a few screenfuls" of data.
 
-#define SHELL_SPECIAL "\t \"&'$;<>()\\|"
+#define SHELL_SPECIAL "\t \"&'$;<>()\\|\n"
 
 #include "os/shell.c.generated.h"
 
@@ -416,7 +416,7 @@ int os_expand_wildcards(int num_pat, char **pat, int *num_file, char ***file, in
   os_remove(tempname);
   if (readlen != len) {
     // unexpected read error
-    semsg(_(e_notread), tempname);
+    semsg(_(e_cant_read_file_str), tempname);
     xfree(tempname);
     xfree(buffer);
     return FAIL;
@@ -710,9 +710,11 @@ int os_call_shell(char *cmd, int opts, char *extra_args)
 
   if (!emsg_silent && exitcode != 0 && !(opts & kShellOptSilent)) {
     msg_ext_set_kind("shell_ret");
-    msg_puts(_("\nshell returned "));
+    if (!ui_has(kUIMessages)) {
+      msg_putchar('\n');
+    }
+    msg_puts(_("shell returned "));
     msg_outnum(exitcode);
-    msg_putchar('\n');
   }
 
   State = current_state;
@@ -819,7 +821,7 @@ char *get_cmd_output(char *cmd, char *infile, int flags, size_t *ret_len)
   fclose(fd);
   os_remove(tempname);
   if (i != len) {
-    semsg(_(e_notread), tempname);
+    semsg(_(e_cant_read_file_str), tempname);
     XFREE_CLEAR(buffer);
   } else if (ret_len == NULL) {
     // Change NUL into SOH, otherwise the string is truncated.
@@ -933,7 +935,7 @@ static int do_os_system(char **argv, const char *input, size_t len, char **outpu
   if (has_input) {
     WBuffer *input_buffer = wstream_new_buffer((char *)input, len, 1, NULL);
 
-    if (!wstream_write(&proc->in, input_buffer)) {
+    if (wstream_write(&proc->in, input_buffer) != 0) {
       // couldn't write, stop the process and tell the user about it
       proc_stop(proc);
       goto end;
@@ -1130,6 +1132,7 @@ static void out_data_append_to_screen(const char *output, size_t *count, int fd,
   const char *p = output;
   const char *end = output + *count;
   msg_ext_set_kind(fd == STDERR_FILENO ? "shell_err" : "shell_out");
+  msg_ext_append = true;
   while (p < end) {
     if (*p == '\n' || *p == '\r' || *p == TAB || *p == BELL) {
       msg_putchar_hl((uint8_t)(*p), fd == STDERR_FILENO ? HLF_SE : HLF_SO);

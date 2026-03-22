@@ -204,20 +204,19 @@ function M._get_open_cmd()
   end
 end
 
---- Returns all URLs at cursor, if any.
---- @return string[]
-function M._get_urls()
-  local urls = {} ---@type string[]
-
-  local bufnr = vim.api.nvim_get_current_buf()
-  local cursor = vim.api.nvim_win_get_cursor(0)
-  local row = cursor[1] - 1
-  local col = cursor[2]
-
-  -- Find LSP document links under the cursor.
+--- @param bufnr integer
+local get_lsp_urls = function(bufnr)
+  local has_lsp_support = false
+  for _, client in pairs(vim.lsp.get_clients({ bufnr = bufnr })) do
+    has_lsp_support = has_lsp_support or client:supports_method('textDocument/documentLink', bufnr)
+  end
+  if not has_lsp_support then
+    return {}
+  end
   local params = { textDocument = vim.lsp.util.make_text_document_params(bufnr) }
   local results = vim.lsp.buf_request_sync(bufnr, 'textDocument/documentLink', params)
 
+  local urls = {}
   for client_id, result in pairs(results or {}) do
     if result.error then
       vim.lsp.log.error(result.error)
@@ -239,6 +238,20 @@ function M._get_urls()
       end
     end
   end
+  return urls
+end
+
+--- Returns all URLs at cursor, if any.
+--- @return string[]
+function M._get_urls()
+  local urls = {} ---@type string[]
+
+  local bufnr = vim.api.nvim_get_current_buf()
+  local cursor = vim.api.nvim_win_get_cursor(0)
+  local row = cursor[1] - 1
+  local col = cursor[2]
+
+  urls = vim.list_extend(urls, get_lsp_urls(bufnr))
 
   local extmarks = vim.api.nvim_buf_get_extmarks(bufnr, -1, { row, col }, { row, col }, {
     details = true,
@@ -291,6 +304,89 @@ function M._get_urls()
   end
 
   return urls
+end
+
+do
+  ---@class ProgressMessage
+  ---@field id? number|string  ID of the progress message
+  ---@field title? string   Title of the progress message
+  ---@field status string  Status: "running" | "success" | "failed" | "cancel"
+  ---@field percent? integer Percent complete (0–100)
+  ---@private
+
+  --- Cache of active progress messages, keyed by msg_id
+  --- TODO(justinmk): visibility of "stale" (never-finished) Progress. https://github.com/neovim/neovim/pull/35428#discussion_r2942696157
+  ---@type table<integer, ProgressMessage>
+  local progress = {}
+
+  -- store progress events
+  local progress_group, progress_autocmd = nil, nil
+
+  --- Initialize Progress handlers.
+  local function progress_init()
+    progress_group = vim.api.nvim_create_augroup('nvim.ui.progress_status', { clear = true })
+    progress_autocmd = vim.api.nvim_create_autocmd('Progress', {
+      group = progress_group,
+      desc = 'Tracks progress messages for vim.ui.progress_status()',
+      ---@param ev {data: {id: integer, title: string, status: string, percent: integer}}
+      callback = function(ev)
+        if not ev.data or not ev.data.id then
+          return
+        end
+        ev.data.percent = ev.data.percent or 0
+        progress[ev.data.id] = ev.data
+
+        -- Clear finished items
+        if
+          ev.data.status == 'success'
+          or ev.data.percent == 100
+          or ev.data.status == 'failed'
+          or ev.data.status == 'cancel'
+        then
+          progress[ev.data.id] = nil
+        end
+      end,
+    })
+  end
+
+  --- Gets a status description summarizing currently running progress messages.
+  --- - If none: returns empty string
+  --- - If one running item: "title: 42%"
+  --- - If multiple running items: "Progress: N items AVG%"
+  ---@param running ProgressMessage[]
+  ---@return string
+  local function progress_status_fmt(running)
+    local count = #running
+    if count == 0 then
+      return '' -- nothing to show
+    elseif count == 1 then
+      local progress_item = running[1]
+      if progress_item.title == nil then
+        return string.format('%d%%%% ', progress_item.percent or 0)
+      end
+      return string.format('%s: %d%%%% ', progress_item.title, progress_item.percent or 0)
+    else
+      local sum = 0 ---@type integer
+      for _, progress_item in ipairs(running) do
+        sum = sum + (progress_item.percent or 0)
+      end
+      local avg = math.floor(sum / count)
+      return string.format('Progress: %d items %d%%%% ', count, avg)
+    end
+  end
+
+  --- Gets a status description summarizing currently running progress messages.
+  --- Convenient for inclusion in 'statusline'.
+  ---
+  ---@return string # Progress status
+  function M.progress_status()
+    if progress_autocmd == nil then
+      progress_init()
+    end
+
+    local running = vim.tbl_values(progress)
+    return progress_status_fmt(running) or ''
+  end
 end
 
 return M

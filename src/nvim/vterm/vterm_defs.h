@@ -65,6 +65,8 @@ typedef struct {
   unsigned dhl       : 2;  // On a DECDHL line (1=top 2=bottom)
   unsigned small     : 1;
   unsigned baseline  : 2;
+  unsigned dim       : 1;
+  unsigned overline  : 1;
 } VTermScreenCellAttrs;
 
 typedef struct {
@@ -87,6 +89,7 @@ typedef enum {
   VTERM_PROP_MOUSE,             // number
   VTERM_PROP_FOCUSREPORT,       // bool
   VTERM_PROP_THEMEUPDATES,      // bool
+  VTERM_PROP_SYNCOUTPUT,        // bool
 
   VTERM_N_PROPS,
 } VTermProp;
@@ -158,8 +161,10 @@ typedef enum {
   VTERM_ATTR_SMALL_MASK      = 1 << 10,
   VTERM_ATTR_BASELINE_MASK   = 1 << 11,
   VTERM_ATTR_URI_MASK        = 1 << 12,
+  VTERM_ATTR_DIM_MASK        = 1 << 13,
+  VTERM_ATTR_OVERLINE_MASK   = 1 << 14,
 
-  VTERM_ALL_ATTRS_MASK = (1 << 13) - 1,
+  VTERM_ALL_ATTRS_MASK = (1 << 15) - 1,
 } VTermAttrMask;
 
 typedef enum {
@@ -187,6 +192,8 @@ typedef enum {
   VTERM_ATTR_SMALL,      // bool:   73, 74, 75
   VTERM_ATTR_BASELINE,   // number: 73, 74, 75
   VTERM_ATTR_URI,        // number
+  VTERM_ATTR_DIM,        // bool:   2, 22
+  VTERM_ATTR_OVERLINE,   // bool:   53, 55
 
   VTERM_N_ATTRS,
 } VTermAttr;
@@ -314,6 +321,8 @@ typedef struct {
   unsigned font      : 4;  // 0 to 9
   unsigned small     : 1;
   unsigned baseline  : 2;
+  unsigned dim       : 1;
+  unsigned overline  : 1;
 
   // Extra state storage that isn't strictly pen-related
   unsigned protected_cell : 1;

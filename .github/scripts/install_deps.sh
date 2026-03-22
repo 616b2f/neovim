@@ -28,6 +28,8 @@ if [[ $OS == Linux ]]; then
     sudo ./llvm.sh $CLANG_VERSION
     sudo update-alternatives --install /usr/bin/clang clang /usr/bin/clang-$CLANG_VERSION 100
     sudo update-alternatives --set clang /usr/bin/clang-$CLANG_VERSION
+    sudo update-alternatives --install /usr/bin/clang-tidy clang-tidy /usr/bin/clang-tidy-$CLANG_VERSION 100
+    sudo update-alternatives --set clang-tidy /usr/bin/clang-tidy-$CLANG_VERSION
   fi
 
   if [[ -n $TEST ]]; then
@@ -45,7 +47,6 @@ if [[ $OS == Linux ]]; then
   fi
 elif [[ $OS == Darwin ]]; then
   brew update --quiet
-  brew install ninja
   if [[ -n $TEST ]]; then
     brew install cpanminus fish fswatch
 

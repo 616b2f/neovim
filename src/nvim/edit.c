@@ -1602,8 +1602,8 @@ static void init_prompt(int cmdchar_todo)
   int prompt_len = (int)strlen(prompt);
 
   // In case the mark is set to a nonexistent line.
-  curbuf->b_prompt_start.mark.lnum = MIN(curbuf->b_prompt_start.mark.lnum,
-                                         curbuf->b_ml.ml_line_count);
+  curbuf->b_prompt_start.mark.lnum = MAX(1, MIN(curbuf->b_prompt_start.mark.lnum,
+                                                curbuf->b_ml.ml_line_count));
 
   curwin->w_cursor.lnum = MAX(curwin->w_cursor.lnum, curbuf->b_prompt_start.mark.lnum);
   char *text = ml_get(curbuf->b_prompt_start.mark.lnum);
@@ -1623,6 +1623,8 @@ static void init_prompt(int cmdchar_todo)
       ml_append(lnum, prompt, 0, false);
       appended_lines_mark(lnum, 1);
       curbuf->b_prompt_start.mark.lnum = curbuf->b_ml.ml_line_count;
+      // Like submitting, undo history was relevant to the old prompt.
+      u_clearallandblockfree(curbuf);
     }
     curbuf->b_prompt_start.mark.col = prompt_len;
     curwin->w_cursor.lnum = curbuf->b_ml.ml_line_count;
@@ -3094,7 +3096,7 @@ static bool ins_esc(int *count, int cmdchar, bool nomove)
 
   // Remember the last Insert position in the '^ mark.
   if ((cmdmod.cmod_flags & CMOD_KEEPJUMPS) == 0) {
-    fmarkv_T view = mark_view_make(curwin->w_topline, curwin->w_cursor);
+    fmarkv_T view = mark_view_make(curwin, curwin->w_cursor);
     RESET_FMARK(&curbuf->b_last_insert, curwin->w_cursor, curbuf->b_fnum, view);
   }
 

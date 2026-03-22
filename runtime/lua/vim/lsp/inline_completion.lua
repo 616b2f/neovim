@@ -92,6 +92,7 @@ end
 
 ---@package
 function Completor:destroy()
+  self:reset_timer()
   api.nvim_buf_clear_namespace(self.bufnr, namespace, 0, -1)
   api.nvim_del_augroup_by_id(self.augroup)
   self.active[self.bufnr] = nil
@@ -118,7 +119,7 @@ end
 ---@param ctx lsp.HandlerContext
 function Completor:handler(err, result, ctx)
   if err then
-    log.error('inlinecompletion', err)
+    log.error('inline_completion', err)
     return
   end
   if not result or not vim.startswith(api.nvim_get_mode().mode, 'i') then
