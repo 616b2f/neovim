@@ -139,7 +139,7 @@ func s:GetFilenameChecks() abort
     \ 'bass': ['file.bass'],
     \ 'bc': ['file.bc'],
     \ 'bdf': ['file.bdf'],
-    \ 'beancount': ['file.beancount'],
+    \ 'beancount': ['file.beancount', 'file.bean'],
     \ 'bib': ['file.bib'],
     \ 'bicep': ['file.bicep'],
     \ 'bicep-params': ['file.bicepparam'],
@@ -327,6 +327,9 @@ func s:GetFilenameChecks() abort
     \ 'gedcom': ['file.ged', 'lltxxxxx.txt', '/tmp/lltmp', '/tmp/lltmp-file', 'any/tmp/lltmp', 'any/tmp/lltmp-file'],
     \ 'gel': ['file.gel'],
     \ 'gemtext': ['file.gmi', 'file.gemini'],
+    \ 'ghostty': ['ghostty/config', 'ghostty/keymaps.ghostty', '/.config/ghostty/config', '/.config/ghostty/keymaps.ghostty',
+    \             '~/Library/Application Support/com.mitchellh.ghostty/config.ghostty', '~/Library/Application Support/com.mitchellh.ghostty/config',
+    \             '~/.config/ghostty/themes/Custom Theme', '/usr/share/ghostty/themes/Builtin Theme'],
     \ 'gift': ['file.gift'],
     \ 'gitattributes': ['file.git/info/attributes', '.gitattributes', '/.config/git/attributes', '/etc/gitattributes', '/usr/local/etc/gitattributes', 'some.git/info/attributes'] + s:WhenConfigHome('$XDG_CONFIG_HOME/git/attributes'),
     \ 'gitcommit': ['COMMIT_EDITMSG', 'MERGE_MSG', 'TAG_EDITMSG', 'NOTES_EDITMSG', 'EDIT_DESCRIPTION'],
@@ -599,6 +602,7 @@ func s:GetFilenameChecks() abort
     \ 'numbat': ['file.nbt'],
     \ 'obj': ['file.obj'],
     \ 'objdump': ['file.objdump', 'file.cppobjdump'],
+    \ 'objectscript_routine': ['file.rtn'],
     \ 'obse': ['file.obl', 'file.obse', 'file.oblivion', 'file.obscript'],
     \ 'ocaml': ['file.ml', 'file.mli', 'file.mll', 'file.mly', '.ocamlinit', 'file.mlt', 'file.mlp', 'file.mlip', 'file.mli.cppo', 'file.ml.cppo'],
     \ 'occam': ['file.occ'],
@@ -632,7 +636,7 @@ func s:GetFilenameChecks() abort
     \ 'pilrc': ['file.rcp'],
     \ 'pine': ['.pinerc', 'pinerc', '.pinercex', 'pinercex'],
     \ 'pinfo': ['/etc/pinforc', '/.pinforc', 'any/.pinforc', 'any/etc/pinforc'],
-    \ 'pkl': ['file.pkl', 'file.pcf'],
+    \ 'pkl': ['file.pkl', 'file.pcf', 'any/PklProject'],
     \ 'pli': ['file.pli', 'file.pl1'],
     \ 'plm': ['file.plm', 'file.p36', 'file.pac'],
     \ 'plp': ['file.plp'],
@@ -963,6 +967,7 @@ func s:GetFilenameChecks() abort
     \ 'wgsl': ['file.wgsl'],
     \ 'winbatch': ['file.wbt'],
     \ 'wit': ['file.wit'],
+    \ 'wks': ['file.wks', 'file.wks.in', 'file.wks.inc'],
     \ 'wml': ['file.wml'],
     \ 'wsh': ['file.wsf', 'file.wsc'],
     \ 'wsml': ['file.wsml'],
@@ -988,7 +993,7 @@ func s:GetFilenameChecks() abort
     \ 'xslt': ['file.xsl', 'file.xslt'],
     \ 'yacc': ['file.yy', 'file.yxx', 'file.y++'],
     \ 'yaml': ['file.yaml', 'file.yml', 'file.eyaml', 'file.kyaml', 'file.kyml', 'any/.bundle/config', '.clangd', '.clang-format', '.clang-tidy', 'file.mplstyle', 'matplotlibrc', 'yarn.lock',
-    \          '/home/user/.kube/config', '/home/user/.kube/kuberc', '.condarc', 'condarc', '.mambarc', 'mambarc', 'pixi.lock'],
+    \          '/home/user/.kube/config', '/home/user/.kube/kuberc', '.condarc', 'condarc', '.mambarc', 'mambarc', 'pixi.lock', 'buf.lock'],
     \ 'yang': ['file.yang'],
     \ 'yara': ['file.yara', 'file.yar'],
     \ 'yuck': ['file.yuck'],
@@ -1104,7 +1109,8 @@ func s:GetScriptChecks() abort
       \ 'php': [['#!/path/php']],
       \ 'python': [['#!/path/python'],
       \            ['#!/path/python2'],
-      \            ['#!/path/python3']],
+      \            ['#!/path/python3'],
+      \            ['#!/usr/bin/env -S uv run --script']],
       \ 'groovy': [['#!/path/groovy']],
       \ 'ruby': [['#!/path/ruby']],
       \ 'javascript': [['#!/path/node'],
@@ -2764,6 +2770,12 @@ func Test_inc_file()
   call assert_equal('pov', &filetype)
   bwipe!
 
+  " ObjectScript routine
+  call writefile(['ROUTINE Sample [Type=INC]'], 'Xfile.inc', 'D')
+  split Xfile.inc
+  call assert_equal('objectscript_routine', &filetype)
+  bwipe!
+
   let g:filetype_inc = 'foo'
   split Xfile.inc
   call assert_equal('foo', &filetype)
@@ -2830,6 +2842,16 @@ func Test_inc_file()
   call assert_equal('bitbake', &filetype)
   bwipe!
 
+  call writefile(['FOO_BAR[baz] = "foobar"'], 'Xfile.inc')
+  split Xfile.inc
+  call assert_equal('bitbake', &filetype)
+  bwipe!
+
+  call writefile(['FOO_BAR_foo/bar[baz/bazzer] = "foobar"'], 'Xfile.inc')
+  split Xfile.inc
+  call assert_equal('bitbake', &filetype)
+  bwipe!
+
   call writefile(['MACHINEOVERRIDES =. "qemuall:"'], 'Xfile.inc')
   split Xfile.inc
   call assert_equal('bitbake', &filetype)
@@ -2845,6 +2867,72 @@ func Test_inc_file()
   split Xfile.inc
   call assert_equal('foo', &filetype)
   bwipe!
+
+  filetype off
+endfunc
+
+func Test_int_file()
+  filetype on
+
+  " Intel HEX
+  call writefile([':10010000214601360121470136007EFE09D2190140'], 'Xfile.int', 'D')
+  split Xfile.int
+  call assert_equal('hex', &filetype)
+  bwipe!
+
+  " ObjectScript routine
+  call writefile(['ROUTINE Sample [Type=INT]'], 'Xfile.int', 'D')
+  split Xfile.int
+  call assert_equal('objectscript_routine', &filetype)
+  bwipe!
+
+  " ObjectScript routine by IRIS marker in first line
+  call writefile(['Exported from IRIS source control'], 'Xfile.int', 'D')
+  split Xfile.int
+  call assert_equal('objectscript_routine', &filetype)
+  bwipe!
+
+  " Not ObjectScript routine by partial IRIS match in first line
+  call writefile(['Exported from IRISation source control'], 'Xfile.int', 'D')
+  split Xfile.int
+  call assert_equal('hex', &filetype)
+  bwipe!
+
+  " ObjectScript routine by %RO marker in first three lines
+  call writefile(['; generated file', '%RO routine metadata'], 'Xfile.int', 'D')
+  split Xfile.int
+  call assert_equal('objectscript_routine', &filetype)
+  bwipe!
+
+  let g:filetype_int = 'foo'
+  split Xfile.int
+  call assert_equal('foo', &filetype)
+  bwipe!
+  unlet g:filetype_int
+
+  filetype off
+endfunc
+
+func Test_mac_file()
+  filetype on
+
+  " Assembly
+  call writefile(['looks like asm'], 'Xfile.mac', 'D')
+  split Xfile.mac
+  call assert_equal('asm', &filetype)
+  bwipe!
+
+  " ObjectScript routine
+  call writefile(['ROUTINE Sample [Type=MAC]'], 'Xfile.mac', 'D')
+  split Xfile.mac
+  call assert_equal('objectscript_routine', &filetype)
+  bwipe!
+
+  let g:filetype_mac = 'foo'
+  split Xfile.mac
+  call assert_equal('foo', &filetype)
+  bwipe!
+  unlet g:filetype_mac
 
   filetype off
 endfunc

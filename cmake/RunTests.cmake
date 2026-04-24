@@ -28,12 +28,6 @@ file(CREATE_LINK ${ROOT_DIR}/src ${TEST_XDG_PREFIX}/src SYMBOLIC)
 file(CREATE_LINK ${ROOT_DIR}/test ${TEST_XDG_PREFIX}/test SYMBOLIC)
 file(CREATE_LINK ${ROOT_DIR}/README.md ${TEST_XDG_PREFIX}/README.md SYMBOLIC)
 
-# TODO(dundargoc): The CIRRUS_CI environment variable isn't passed to here from
-# the main CMakeLists.txt, so we have to manually pass it to this script and
-# re-set the environment variable. Investigate if we can avoid manually setting
-# it like with the GITHUB_CI environment variable.
-set(ENV{CIRRUS_CI} ${CIRRUS_CI})
-
 if(NOT DEFINED ENV{NVIM_LOG_FILE})
   set(ENV{NVIM_LOG_FILE} ${BUILD_DIR}/nvim.log)
 endif()
@@ -60,18 +54,18 @@ if(IS_ABSOLUTE ${TEST_PATH})
   file(RELATIVE_PATH TEST_PATH "${ROOT_DIR}" "${TEST_PATH}")
 endif()
 
-separate_arguments(BUSTED_ARGS NATIVE_COMMAND $ENV{BUSTED_ARGS})
+separate_arguments(TEST_ARGS NATIVE_COMMAND $ENV{TEST_ARGS})
 
 if(DEFINED ENV{TEST_TAG} AND NOT "$ENV{TEST_TAG}" STREQUAL "")
-  list(APPEND BUSTED_ARGS --tags $ENV{TEST_TAG})
+  list(APPEND TEST_ARGS --tags $ENV{TEST_TAG})
 endif()
 
 if(DEFINED ENV{TEST_FILTER} AND NOT "$ENV{TEST_FILTER}" STREQUAL "")
-  list(APPEND BUSTED_ARGS --filter $ENV{TEST_FILTER})
+  list(APPEND TEST_ARGS --filter $ENV{TEST_FILTER})
 endif()
 
 if(DEFINED ENV{TEST_FILTER_OUT} AND NOT "$ENV{TEST_FILTER_OUT}" STREQUAL "")
-  list(APPEND BUSTED_ARGS --filter-out $ENV{TEST_FILTER_OUT})
+  list(APPEND TEST_ARGS --filter-out $ENV{TEST_FILTER_OUT})
 endif()
 
 # TMPDIR: for testutil.tmpname() and Nvim tempname().
@@ -95,14 +89,14 @@ endif()
 execute_process(
   # Note: because of "-ll" (low-level interpreter mode), some modules like
   # _core/editor.lua are not loaded.
-  COMMAND ${NVIM_PRG} -ll ${ROOT_DIR}/test/lua_runner.lua ${DEPS_INSTALL_DIR}/share/lua/5.1/ busted -v -o test.busted.outputHandlers.nvim
-    -Xoutput "{\"test_path\": \"${TEST_PATH}\", \"summary_file\": \"${TEST_SUMMARY_FILE}\"}"
-    --lazy --helper=${TEST_DIR}/${TEST_TYPE}/preload.lua
+  COMMAND ${NVIM_PRG} -ll ${ROOT_DIR}/test/runner.lua -v
+    --summary-file=${TEST_SUMMARY_FILE}
+    --helper=${TEST_DIR}/${TEST_TYPE}/preload.lua
     --lpath=${BUILD_DIR}/?.lua
     --lpath=${ROOT_DIR}/src/?.lua
     --lpath=${ROOT_DIR}/runtime/lua/?.lua
     --lpath=?.lua
-    ${BUSTED_ARGS}
+    ${TEST_ARGS}
     ${TEST_PATH}
   TIMEOUT $ENV{TEST_TIMEOUT}
   WORKING_DIRECTORY ${TEST_XDG_PREFIX}

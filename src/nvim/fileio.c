@@ -131,9 +131,12 @@ void filemess(buf_T *buf, char *name, char *s)
   msg_scroll = msg_scroll_save;
   msg_scrolled_ign = true;
   // may truncate the message to avoid a hit-return prompt
-  msg_outtrans(msg_may_trunc(false, IObuff), 0, false);
+  if (*s == NUL) {
+    msg_progress(IObuff, "bufwrite", "running", 0, false, true);
+  } else {
+    msg_outtrans(msg_may_trunc(false, IObuff), 0, false);
+  }
   msg_clr_eos();
-  ui_flush();
   msg_scrolled_ign = false;
 }
 
@@ -279,7 +282,7 @@ int readfile(char *fname, char *sfname, linenr_T from, linenr_T lines_to_skip,
   if (sfname == NULL) {
     sfname = fname;
   }
-#if defined(UNIX)
+#ifdef UNIX
   fname = sfname;
 #endif
 
@@ -2498,7 +2501,14 @@ bool vim_fgets(char *buf, int size, FILE *fp)
 {
   char *retval;
 
-  assert(size > 0);
+  // safety check
+  if (size < 2) {
+    if (size == 1) {
+      buf[0] = NUL;
+    }
+    return true;
+  }
+
   buf[size - 2] = NUL;
 
   do {
@@ -3267,7 +3277,7 @@ void write_lnum_adjust(linenr_T offset)
   }
 }
 
-#if defined(BACKSLASH_IN_FILENAME)
+#ifdef BACKSLASH_IN_FILENAME
 /// Convert all backslashes in fname to forward slashes in-place,
 /// unless when it looks like a URL.
 void forward_slash(char *fname)
@@ -3858,7 +3868,7 @@ char *file_pat_to_reg_pat(const char *pat, const char *pat_end, char *allow_dirs
   return reg_pat;
 }
 
-#if defined(EINTR)
+#ifdef EINTR
 
 // Type of buffer size argument of read() and write() is platform-dependent.
 # ifdef MSWIN

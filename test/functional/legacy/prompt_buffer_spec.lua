@@ -11,6 +11,7 @@ local expect = n.expect
 local poke_eventloop = n.poke_eventloop
 local api = n.api
 local eq = t.eq
+local pcall_err = t.pcall_err
 local neq = t.neq
 local exec_lua = n.exec_lua
 
@@ -31,14 +32,18 @@ describe('prompt buffer', function()
           close
         else
           " Add the output above the current prompt.
-          call append(line("$") - 1, split('Command: "' . a:text . '"', '\n'))
+          call prompt_appendbuf(bufnr(''), split('Command: "' . a:text . '"', '\n'))
+          " Reset &modified to allow the buffer to be closed.
+          set nomodified
           call timer_start(20, {id -> TimerFunc(a:text)})
         endif
       endfunc
 
       func TimerFunc(text)
         " Add the output above the current prompt.
-        call append(line("$") - 1, split('Result: "' . a:text .'"', '\n'))
+        call prompt_appendbuf(bufnr(''),  split('Result: "' . a:text .'"', '\n'))
+        " Reset &modified to allow the buffer to be closed.
+        set nomodified
       endfunc
 
       func SwitchWindows()

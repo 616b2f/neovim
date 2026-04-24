@@ -2757,7 +2757,7 @@ static bool close_last_window_tabpage(win_T *win, bool free_buf, tabpage_T *prev
 /// "abort_if_last" is passed to close_buffer(): abort closing if all other
 /// windows are closed.
 ///
-/// @return  whether close_buffer() decremented b_nwindows
+/// @return  @see close_buffer().
 static bool win_close_buffer(win_T *win, int action, bool abort_if_last)
   FUNC_ATTR_NONNULL_ALL
 {
@@ -2778,10 +2778,10 @@ static bool win_close_buffer(win_T *win, int action, bool abort_if_last)
   if (win->w_buffer != NULL) {
     bufref_T bufref;
     set_bufref(&bufref, curbuf);
-    win->w_locked = true;
-    retval = close_buffer(win, win->w_buffer, action, abort_if_last, true);
+    win->w_locked++;
+    retval = close_buffer(win, win->w_buffer, action, abort_if_last, true, true);
     if (win_valid_any_tab(win)) {
-      win->w_locked = false;
+      win->w_locked--;
     }
 
     // Make sure curbuf is valid. It can become invalid if 'bufhidden' is
@@ -2798,8 +2798,7 @@ static bool win_close_buffer(win_T *win, int action, bool abort_if_last)
 /// call this to make the window have a buffer again.
 ///
 /// @param bufref         reference to win->w_buffer before calling close_buffer()
-/// @param did_decrement  whether close_buffer() decremented b_nwindows
-static void win_unclose_buffer(win_T *win, bufref_T *bufref, bool did_decrement)
+static void win_unclose_buffer(win_T *win, bufref_T *bufref)
 {
   if (win->w_buffer == NULL) {
     // If the buffer was removed from the window we have to give it any buffer.
@@ -2809,10 +2808,6 @@ static void win_unclose_buffer(win_T *win, bufref_T *bufref, bool did_decrement)
       curbuf = curwin->w_buffer;
     }
     win_init_empty(win);
-  } else if (did_decrement && win->w_buffer == bufref->br_buf && bufref_valid(bufref)) {
-    // close_buffer() decremented the window count, but we're keeping the window.
-    // As the window is still viewing the buffer, increment the count.
-    win->w_buffer->b_nwindows++;
   }
 }
 
@@ -2853,7 +2848,7 @@ int win_close(win_T *win, bool free_buf, bool force)
       // close the last window until the there are no floating windows
       while (lastwin->w_floating) {
         // `force` flag isn't actually used when closing a floating window.
-        if (win_close(lastwin, free_buf, true) == FAIL) {
+        if (win_close(lastwin, !buf_hide(lastwin->w_buffer), true) == FAIL) {
           // If closing the window fails give up, to avoid looping forever.
           return FAIL;
         }
@@ -2915,22 +2910,22 @@ int win_close(win_T *win, bool free_buf, bool force)
       if (!win_valid(win)) {
         return FAIL;
       }
-      win->w_locked = true;
+      win->w_locked++;
       apply_autocmds(EVENT_BUFLEAVE, NULL, NULL, false, curbuf);
       if (!win_valid(win)) {
         return FAIL;
       }
-      win->w_locked = false;
+      win->w_locked--;
       if (last_window(win)) {
         return FAIL;
       }
     }
-    win->w_locked = true;
+    win->w_locked++;
     apply_autocmds(EVENT_WINLEAVE, NULL, NULL, false, curbuf);
     if (!win_valid(win)) {
       return FAIL;
     }
-    win->w_locked = false;
+    win->w_locked--;
     if (last_window(win)) {
       return FAIL;
     }
@@ -2950,7 +2945,7 @@ int win_close(win_T *win, bool free_buf, bool force)
   bufref_T bufref;
   set_bufref(&bufref, win->w_buffer);
 
-  bool did_decrement = win_close_buffer(win, free_buf ? DOBUF_UNLOAD : 0, true);
+  win_close_buffer(win, free_buf ? DOBUF_UNLOAD : 0, true);
 
   if (win_valid(win) && win->w_buffer == NULL
       && !win->w_floating && last_window(win)) {
@@ -2978,7 +2973,7 @@ int win_close(win_T *win, bool free_buf, bool force)
     if (first_tabpage->tp_next != NULL) {
       emsg(e_floatonly);
     }
-    win_unclose_buffer(win, &bufref, did_decrement);
+    win_unclose_buffer(win, &bufref);
     return FAIL;
   }
   if (close_last_window_tabpage(win, free_buf, prev_curtab)) {
@@ -3012,6 +3007,11 @@ int win_close(win_T *win, bool free_buf, bool force)
   // which may have changed since the last set_bufref. (e.g: close_buffer autocmds)
   set_bufref(&bufref, win->w_buffer);
 
+  if (win->w_buffer != NULL) {
+    win->w_buffer->b_nwindows--;
+  }
+
+  bool had_cmdline_ruler = p_ru && win == curwin && win->w_status_height == 0;
   // Free the memory used for the window and get the window that received
   // the screen space.
   int dir;
@@ -3074,6 +3074,8 @@ int win_close(win_T *win, bool free_buf, bool force)
       win_comp_pos();
       win_fix_scroll(false);
     }
+  } else if (had_cmdline_ruler && wp->w_status_height > 0) {
+    redraw_cmdline = true;  // clear cmdline 'ruler'
   }
   if (bufref.br_buf && bufref_valid(&bufref) && bufref.br_buf->terminal) {
     terminal_check_size(bufref.br_buf->terminal);
@@ -3189,7 +3191,6 @@ bool win_close_othertab(win_T *win, int free_buf, tabpage_T *tp, bool force)
   FUNC_ATTR_NONNULL_ALL
 {
   assert(tp != curtab);
-  bool did_decrement = false;
 
   // Commands that may call win_close_othertab() already check this, but
   // check here again just in case.
@@ -3213,7 +3214,7 @@ bool win_close_othertab(win_T *win, int free_buf, tabpage_T *tp, bool force)
       // close the last window until the there are no floating windows
       while (tp->tp_lastwin->w_floating) {
         // `force` flag isn't actually used when closing a floating window.
-        if (!win_close_othertab(tp->tp_lastwin, free_buf, tp, true)) {
+        if (!win_close_othertab(tp->tp_lastwin, !buf_hide(tp->tp_lastwin->w_buffer), tp, true)) {
           // If closing the window fails give up, to avoid looping forever.
           goto leave_open;
         }
@@ -3251,7 +3252,7 @@ bool win_close_othertab(win_T *win, int free_buf, tabpage_T *tp, bool force)
 
   if (win->w_buffer != NULL) {
     // Close the link to the buffer.
-    did_decrement = close_buffer(win, win->w_buffer, free_buf ? DOBUF_UNLOAD : 0, false, true);
+    close_buffer(win, win->w_buffer, free_buf ? DOBUF_UNLOAD : 0, false, true, true);
   }
 
   // Careful: Autocommands may have closed the tab page or made it the
@@ -3302,6 +3303,10 @@ bool win_close_othertab(win_T *win, int free_buf, tabpage_T *tp, bool force)
   // which may have changed since the last set_bufref. (e.g: close_buffer autocmds)
   set_bufref(&bufref, win->w_buffer);
 
+  if (win->w_buffer != NULL) {
+    win->w_buffer->b_nwindows--;
+  }
+
   // Free the memory used for the window.
   int dir;
   win_free_mem(win, &dir, tp);
@@ -3323,7 +3328,7 @@ bool win_close_othertab(win_T *win, int free_buf, tabpage_T *tp, bool force)
 
 leave_open:
   if (win_valid_any_tab(win)) {
-    win_unclose_buffer(win, &bufref, did_decrement);
+    win_unclose_buffer(win, &bufref);
   }
   return false;
 }
@@ -3364,7 +3369,7 @@ static win_T *win_free_mem(win_T *win, int *dirp, tabpage_T *tp)
   return wp;
 }
 
-#if defined(EXITFREE)
+#ifdef EXITFREE
 void win_free_all(void)
 {
   // avoid an error for switching tabpage with the cmdline window open
@@ -4243,10 +4248,12 @@ static int frame_minwidth(frame_T *topfrp, win_T *next_curwin)
 /// Buffers in the other windows become hidden if 'hidden' is set, or '!' is
 /// used and the buffer was modified.
 ///
-/// Used by ":bdel" and ":only".
+/// Used by ":tabclose" and ":only".
 ///
-/// @param forceit  always hide all other windows
-void close_others(int message, int forceit)
+/// @param message       if true, display error messages
+/// @param forceit       always hide all other windows
+/// @param ignore_pinned if true, also close pinned windows (for :tabclose)
+void close_others(int message, int forceit, bool ignore_pinned)
 {
   win_T *const old_curwin = curwin;
 
@@ -4275,7 +4282,8 @@ void close_others(int message, int forceit)
       curbuf = curwin->w_buffer;
     }
 
-    if (wp == curwin) {                 // don't close current window
+    // don't close current window or pinned windows
+    if (wp == curwin || (wp->w_p_wp && !ignore_pinned)) {
       continue;
     }
 
@@ -4307,7 +4315,17 @@ void close_others(int message, int forceit)
   }
 
   if (message && !ONE_WINDOW) {
-    emsg(_("E445: Other window contains changes"));
+    // Check if remaining windows are non-pinned
+    bool has_non_pinned = false;
+    for (win_T *wp = firstwin; wp != NULL; wp = wp->w_next) {
+      if (wp != curwin && !wp->w_p_wp) {
+        has_non_pinned = true;
+        break;
+      }
+    }
+    if (has_non_pinned) {
+      emsg(_("E445: Other window contains changes"));
+    }
   }
 }
 
@@ -5514,6 +5532,7 @@ win_T *win_alloc(win_T *after, bool hidden)
 
   // use global option for global-local options
   new_wp->w_allbuf_opt.wo_so = new_wp->w_p_so = -1;
+  new_wp->w_allbuf_opt.wo_sop = new_wp->w_p_sop = -1;
   new_wp->w_allbuf_opt.wo_siso = new_wp->w_p_siso = -1;
 
   // We won't calculate w_fraction until resizing the window
@@ -6850,7 +6869,7 @@ static void win_fix_cursor(bool normal)
 
   wp->w_do_win_fix_cursor = false;
   // Determine valid cursor range.
-  int so = MIN(wp->w_view_height / 2, get_scrolloff_value(wp));
+  int so = (int)MIN(wp->w_view_height / 2, get_scrolloff_value(wp));
   linenr_T lnum = wp->w_cursor.lnum;
 
   wp->w_cursor.lnum = wp->w_topline;

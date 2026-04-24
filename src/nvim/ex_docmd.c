@@ -4,6 +4,7 @@
 #include <ctype.h>
 #include <inttypes.h>
 #include <limits.h>
+#include <signal.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdio.h>
@@ -16,6 +17,7 @@
 #include "nvim/api/private/dispatch.h"
 #include "nvim/api/private/helpers.h"
 #include "nvim/api/ui.h"
+#include "nvim/api/vim.h"
 #include "nvim/api/vimscript.h"
 #include "nvim/arglist.h"
 #include "nvim/ascii_defs.h"
@@ -40,8 +42,11 @@
 #include "nvim/eval/typval_defs.h"
 #include "nvim/eval/userfunc.h"
 #include "nvim/eval/vars.h"
+#include "nvim/eval_defs.h"
 #include "nvim/event/loop.h"
 #include "nvim/event/multiqueue.h"
+#include "nvim/event/proc.h"
+#include "nvim/event/socket.h"
 #include "nvim/ex_cmds.h"
 #include "nvim/ex_cmds2.h"
 #include "nvim/ex_cmds_defs.h"
@@ -73,6 +78,8 @@
 #include "nvim/message.h"
 #include "nvim/mouse.h"
 #include "nvim/move.h"
+#include "nvim/msgpack_rpc/channel.h"
+#include "nvim/msgpack_rpc/server.h"
 #include "nvim/normal.h"
 #include "nvim/normal_defs.h"
 #include "nvim/option.h"
@@ -83,6 +90,9 @@
 #include "nvim/os/input.h"
 #include "nvim/os/os.h"
 #include "nvim/os/os_defs.h"
+#ifdef MSWIN
+# include "nvim/os/os_win_console.h"
+#endif
 #include "nvim/os/shell.h"
 #include "nvim/path.h"
 #include "nvim/plines.h"
@@ -1672,7 +1682,9 @@ bool parse_cmdline(char **cmdline, exarg_T *eap, CmdParseInfo *cmdinfo, const ch
     char *arg = eap->arg;
     while (*arg != NUL && *arg != '|' && *arg != '\n') {
       char *start = arg;
+      emsg_skip++;
       skip_expr(&arg, NULL);
+      emsg_skip--;
       // If skip_expr didn't advance, move forward to avoid infinite loop
       if (arg == start) {
         arg++;
@@ -2520,7 +2532,7 @@ char *ex_errmsg(const char *const msg, const char *const arg)
 
 /// The "+" string used in place of an empty command in Ex mode.
 /// This string is used in pointer comparison.
-static char exmode_plus[] = "+";
+static const char exmode_plus[] = "+";
 
 /// Handle a range without a command.
 /// Returns an error message on failure.
@@ -2603,7 +2615,7 @@ int parse_command_modifiers(exarg_T *eap, const char **errormsg, cmdmod_T *cmod,
     if (*eap->cmd == NUL && exmode_active
         && getline_equal(eap->ea_getline, eap->cookie, getexline)
         && curwin->w_cursor.lnum < curbuf->b_ml.ml_line_count) {
-      eap->cmd = exmode_plus;
+      eap->cmd = (char *)exmode_plus;
       use_plus_cmd = true;
       if (!skip_only) {
         ex_pressedreturn = true;
@@ -2861,7 +2873,7 @@ int parse_command_modifiers(exarg_T *eap, const char **errormsg, cmdmod_T *cmod,
       }
     }
   } else if (use_plus_cmd) {
-    eap->cmd = exmode_plus;
+    eap->cmd = (char *)exmode_plus;
   }
 
   return OK;
@@ -4540,14 +4552,14 @@ int getargopt(exarg_T *eap)
   }
 
   // ":read ++edit file"
-  if (strncmp(arg, "edit", 4) == 0) {
+  if (strncmp(arg, "edit", 4) == 0 && !ASCII_ISALPHA(arg[4])) {
     eap->read_edit = true;
     eap->arg = skipwhite(arg + 4);
     return OK;
   }
 
   // ":write ++p foo/bar/file
-  if (strncmp(arg, "p", 1) == 0) {
+  if (arg[0] == 'p' && !ASCII_ISALPHA(arg[1])) {
     eap->mkdir_p = true;
     eap->arg = skipwhite(arg + 1);
     return OK;
@@ -4992,17 +5004,15 @@ static void ex_highlight(exarg_T *eap)
 void not_exiting(bool save_exiting)
 {
   exiting = save_exiting;
-}
-
-/// Call this function if we thought we were going to restart, but we won't
-/// (because of an error).
-void not_restarting(void)
-{
-  restarting = false;
+  set_vim_var_string(VV_EXITREASON, NULL, -1);
 }
 
 bool before_quit_autocmds(win_T *wp, bool quit_all, bool forceit)
 {
+  // Set v:exitreason if not already set (e.g. by :restart).
+  if (*get_vim_var_str(VV_EXITREASON) == NUL) {
+    set_vim_var_string(VV_EXITREASON, S_LEN("quit"));
+  }
   apply_autocmds(EVENT_QUITPRE, NULL, NULL, false, wp->w_buffer);
 
   // Bail out when autocommands closed the window.
@@ -5011,6 +5021,7 @@ bool before_quit_autocmds(win_T *wp, bool quit_all, bool forceit)
   if (!win_valid(wp)
       || curbuf_locked()
       || (wp->w_buffer->b_nwindows == 1 && wp->w_buffer->b_locked > 0)) {
+    set_vim_var_string(VV_EXITREASON, NULL, -1);
     return true;
   }
 
@@ -5023,6 +5034,7 @@ bool before_quit_autocmds(win_T *wp, bool quit_all, bool forceit)
     if (!win_valid(wp)
         || curbuf_locked()
         || (curbuf->b_nwindows == 1 && curbuf->b_locked > 0)) {
+      set_vim_var_string(VV_EXITREASON, NULL, -1);
       return true;
     }
   }
@@ -5146,55 +5158,187 @@ static void ex_quitall(exarg_T *eap)
 
 /// ":restart": restart the Nvim server (using ":qall!").
 /// ":restart +cmd": restart the Nvim server using ":cmd".
-/// ":restart +cmd <command>": restart the Nvim server using ":cmd" and add -c <command> to the new server.
+/// ":restart +cmd <command>": restart the Nvim server using ":cmd" and runs <command> in the new server.
 static void ex_restart(exarg_T *eap)
 {
+  Error err = ERROR_INIT;
+  const bool no_ui = !ui_active();
+  const char *exepath = get_vim_var_str(VV_PROGPATH);
   const list_T *l = get_vim_var_list(VV_ARGV);
   int argc = tv_list_len(l);
-  list_T *argv_cpy = tv_list_alloc(eap->arg ? argc + 2 : argc);
 
-  // Copy v:argv, skipping unwanted items.
-  for (listitem_T *li = l != NULL ? l->lv_first : NULL; li != NULL; li = li->li_next) {
+  char **argv = xcalloc((size_t)argc + 3, sizeof(char *));
+  size_t i = 0;
+  const char *listen_arg = NULL;  // --listen arg given by user, if any.
+
+  // Build args to start the new Nvim, based on the current v:argv.
+  for (const listitem_T *li = l->lv_first; li != NULL; li = li->li_next) {
     const char *arg = tv_get_string(TV_LIST_ITEM_TV(li));
-    size_t arg_size = strlen(arg);
-    assert(arg_size <= (size_t)SSIZE_MAX);
-
-    if (strequal(arg, "--embed") || strequal(arg, "--headless")) {
-      continue;  // Drop --embed/--headless: the client decides how to start+attach the server.
-    } else if (strequal(arg, "-")) {
-      continue;  // Drop stdin ("-") argument.
-    } else if (strequal(arg, "-s")) {
-      // Drop "-s <scriptfile>": skip the scriptfile arg too.
-      if (li->li_next != NULL) {
-        li = li->li_next;
-      }
+    // Drop "-- [files…]". Usually isn't wanted. User can :mksession instead.
+    if (i > 0 && strequal(arg, "--")) {
+      break;
+    }
+    // Drop "-s <scriptfile>": skip the scriptfile arg too.
+    if (i > 0 && strequal(arg, "-s")) {
+      li = li->li_next;
       continue;
-    } else if (strequal(arg, "+:::")) {
-      // The special placeholder "+:::" marks a previous :restart command.
-      // Drop the `"+:::", "-c", "…"` triplet, to avoid "stacking" commands from previous :restart(s).
-      listitem_T *next1 = li->li_next;
-      if (next1 != NULL && strequal(tv_get_string(TV_LIST_ITEM_TV(next1)), "-c")) {
-        listitem_T *next2 = next1->li_next;
-        if (next2 != NULL) {
-          li = next2;
+    }
+    // The address after --listen may be in use by the current server.
+    if (i > 0 && strequal(arg, "--listen")) {
+      const listitem_T *next_li = li->li_next;
+      if (next_li != NULL) {
+        const char *addr = tv_get_string(TV_LIST_ITEM_TV(next_li));
+        if (strstr(addr, ":") || strstr(addr, "/") || strstr(addr, "\\")) {
+          listen_arg = addr;
+#ifdef MSWIN
+          // On Windows, don't pass --listen to new server (named pipe can't be reused immediately).
+          // Instead pass the address via RPC; new server rebinds after startup.
+          li = next_li;
           continue;
+#endif
         }
       }
-      continue;  // If the triplet is incomplete, just skip "+:::"
-    } else if (strequal(arg, "--")) {
-      break;  // Drop "-- [files…]". Usually isn't wanted. User can :mksession instead.
     }
+    // Replace `--embed` OR `--headless` with `--embed` or `--embed --headless` once.
+    // Drop stdin ("-") argument.
+    if (i == 0
+        || (!strequal(arg, "--embed") && !strequal(arg, "--headless") && !strequal(arg, "-"))) {
+      argv[i++] = xstrdup(arg);
+      if (i == 1) {
+        argv[i++] = xstrdup("--embed");
+        // Without --headless, embed waits for UI to attach.
+        // Only add --headless when there is no UI.
+        if (no_ui) {
+          argv[i++] = xstrdup("--headless");
+        }
+      }
+    }
+  }
 
-    tv_list_append_string(argv_cpy, arg, (ssize_t)arg_size);
+#ifdef MSWIN
+  // On Windows, --listen is omitted from child argv because the named pipe can't be reused immediately.
+  // Recover the canonical address from the Lua module state (set by the previous rebind_after_restart() call),
+  // and keep the current listener alive (new server reclaims it).
+  char *listen_arg_alloc = NULL;
+  if (listen_arg == NULL) {
+    Error lua_err = ERROR_INIT;
+    Object rv = NLUA_EXEC_STATIC("return require('vim._core.server').restart_canonical_addr",
+                                 (Array)ARRAY_DICT_INIT, kRetObject, NULL, &lua_err);
+    if (!ERROR_SET(&lua_err) && rv.type == kObjectTypeString && rv.data.string.size > 0) {
+      listen_arg_alloc = xstrdup(rv.data.string.data);
+      listen_arg = listen_arg_alloc;
+    }
+    api_free_object(rv);
+    api_clear_error(&lua_err);
   }
-  // Append `"+:::", "-c", "<command>"` to end of v:argv.
-  // The "+:::" item is a no-op placeholder to mark the :restart "<command>".
-  if (eap->arg && eap->arg[0] != '\0') {
-    tv_list_append_string(argv_cpy, S_LEN("+:::"));
-    tv_list_append_string(argv_cpy, S_LEN("-c"));
-    tv_list_append_string(argv_cpy, eap->arg, (ssize_t)strlen(eap->arg));
+  bool server_stopped = false;
+#else
+  // Stop listening on the --listen address so that the new server can listen.
+  bool server_stopped = listen_arg ? server_stop(listen_arg, true) : false;
+#endif
+
+#ifdef MSWIN
+  bool restart_alloc_console_env = false;
+  if (os_setenv("__NVIM_RESTART_ALLOC_CONSOLE", "1", 1) == 0) {
+    restart_alloc_console_env = true;
   }
-  set_vim_var_list(VV_ARGV, argv_cpy);
+#endif
+
+  CallbackReader on_err = CALLBACK_READER_INIT;
+#ifdef MSWIN
+  // On Windows, don't forward stderr as it won't work after the current server exits.
+  on_err.fwd_err = false;
+#else
+  // On Unix, stderr fd is inherited, so it works even after the current server exits.
+  on_err.fwd_err = true;
+#endif
+  bool detach = true;
+  varnumber_T exit_status;
+
+  Channel *channel = channel_job_start(argv, exepath,
+                                       CALLBACK_READER_INIT, on_err, CALLBACK_NONE,
+                                       false, true, true, detach, kChannelStdinPipe,
+                                       NULL, 0, 0, NULL, &exit_status);
+#ifdef MSWIN
+  if (restart_alloc_console_env) {
+    os_unsetenv("__NVIM_RESTART_ALLOC_CONSOLE");
+  }
+#endif
+  if (!channel) {
+    emsg("cannot create a channel job");
+    goto fail_1;
+  }
+
+  // Prevent new server from self-exiting when the channel closes.
+  ArenaMem result_mem = NULL;
+  MAXSIZE_TEMP_ARRAY(detach_args, 1);
+  ADD_C(detach_args, BOOLEAN_OBJ(true));
+  rpc_send_call(channel->id, "nvim__chan_set_detach", detach_args, &result_mem, &err);
+  if (ERROR_SET(&err)) {
+    goto fail_2;
+  }
+  arena_mem_free(result_mem);
+  result_mem = NULL;
+
+  if (*eap->arg != NUL) {
+    // Execute [command] on new server on UIEnter.
+    MAXSIZE_TEMP_DICT(autocmd_opts, 3);
+    PUT_C(autocmd_opts, "once", BOOLEAN_OBJ(true));
+    PUT_C(autocmd_opts, "nested", BOOLEAN_OBJ(true));
+    PUT_C(autocmd_opts, "command", CSTR_AS_OBJ(eap->arg));
+    MAXSIZE_TEMP_ARRAY(autocmd_args, 2);
+    ADD_C(autocmd_args, CSTR_AS_OBJ("UIEnter"));
+    ADD_C(autocmd_args, DICT_OBJ(autocmd_opts));
+    rpc_send_call(channel->id, "nvim_create_autocmd", autocmd_args, &result_mem, &err);
+    if (ERROR_SET(&err)) {
+      goto fail_2;
+    }
+    arena_mem_free(result_mem);
+    result_mem = NULL;
+  }
+
+  // Get the new server's initial address. On Windows this is the temporary self-generated address.
+  MAXSIZE_TEMP_ARRAY(servername_args, 1);
+  ADD_C(servername_args, CSTR_AS_OBJ("servername"));
+  Object result = rpc_send_call(channel->id, "nvim_get_vvar", servername_args, &result_mem, &err);
+  if (ERROR_SET(&err)) {
+    goto fail_2;
+  }
+  if (result.type != kObjectTypeString || result.data.string.size == 0) {
+    emsg("restart failed: could not get listen address from new server");
+    goto fail_2;
+  }
+  // New server's self-generated address.
+  char *listen_addr = xmemdupz(result.data.string.data, result.data.string.size);
+  arena_mem_free(result_mem);
+  result_mem = NULL;
+
+#ifdef MSWIN
+  if (listen_arg != NULL) {
+    // Tell the new server to reclaim the canonical --listen address once the old listener exits,
+    // then retire the bootstrap address after all UIs have reattached (or timeout).
+    MAXSIZE_TEMP_ARRAY(lua_args, 2);
+    ADD_C(lua_args,
+          CSTR_AS_OBJ("return require('vim._core.server').rebind_after_restart(...)"));
+    MAXSIZE_TEMP_ARRAY(handoff_params, 3);
+    ADD_C(handoff_params, CSTR_AS_OBJ(listen_arg));
+    ADD_C(handoff_params, INTEGER_OBJ((Integer)ui_active()));
+    ADD_C(lua_args, ARRAY_OBJ(handoff_params));
+    rpc_send_call(channel->id, "nvim_exec_lua", lua_args, &result_mem, &err);
+    if (ERROR_SET(&err)) {
+      goto fail_2;
+    }
+    arena_mem_free(result_mem);
+    result_mem = NULL;
+  }
+#endif
+
+  // Send restart event with new listen address to all UIs.
+  ui_call_restart(cstr_as_string(listen_addr));
+  ui_flush();
+  xfree(listen_addr);
+
+  set_vim_var_string(VV_EXITREASON, S_LEN("restart"));
 
   char *quit_cmd = (eap->do_ecmd_cmd) ? eap->do_ecmd_cmd : "qall";
   char *quit_cmd_copy = NULL;
@@ -5204,21 +5348,49 @@ static void ex_restart(exarg_T *eap)
     quit_cmd_copy = concat_str("confirm ", quit_cmd);
     quit_cmd = quit_cmd_copy;
   }
-
-  Error err = ERROR_INIT;
-  restarting = true;
+  // Try to quit.
   nvim_command(cstr_as_string(quit_cmd), &err);
   xfree(quit_cmd_copy);
+
   if (ERROR_SET(&err)) {
     emsg(err.msg);  // Could not exit
     api_clear_error(&err);
-    not_restarting();
-    return;
-  }
-  if (!exiting) {
+  } else if (!exiting) {
     emsg("restart failed: +cmd did not quit the server");
-    not_restarting();
   }
+
+fail_2:
+  set_vim_var_string(VV_EXITREASON, NULL, -1);
+  if (ERROR_SET(&err)) {
+    emsg(err.msg);
+    api_clear_error(&err);
+  }
+  arena_mem_free(result_mem);
+  result_mem = NULL;
+
+#ifndef MSWIN
+  // Before killing the new server, close its stderr to avoid polluting the current UI.
+  MAXSIZE_TEMP_ARRAY(chanclose_expr_args, 1);
+  ADD_C(chanclose_expr_args, CSTR_AS_OBJ("chanclose(v:stderr)"));
+  rpc_send_call(channel->id, "nvim_eval", chanclose_expr_args, &result_mem, &err);
+  api_clear_error(&err);
+  arena_mem_free(result_mem);
+#endif
+
+  // Kill the new Nvim server.
+  proc_stop(&channel->stream.proc);
+  if (proc_wait(&channel->stream.proc, -1, NULL) < 0) {
+    emsg("killing new nvim server failed");
+  }
+
+fail_1:
+  // Restart listening on the --listen address.
+  if (server_stopped && server_start(listen_arg) != 0) {
+    semsg("couldn't resume listening on %s", listen_arg);
+  }
+#ifdef MSWIN
+  xfree(listen_arg_alloc);
+#endif
 }
 
 /// ":close": close current window, unless it is the last one
@@ -5396,7 +5568,7 @@ void tabpage_close(int forceit)
     ex_win_close(forceit, curwin, NULL);
   }
   if (!ONE_WINDOW) {
-    close_others(true, forceit);
+    close_others(true, forceit, true);
   }
   if (ONE_WINDOW) {
     ex_win_close(forceit, curwin, NULL);
@@ -5469,7 +5641,7 @@ static void ex_only(exarg_T *eap)
       win_goto(wp);
     }
   }
-  close_others(true, eap->forceit);
+  close_others(true, eap->forceit, false);
 }
 
 static void ex_hide(exarg_T *eap)
@@ -6000,7 +6172,10 @@ static void ex_detach(exarg_T *eap)
       emsg(e_invchan);
       return;
     }
-    chan->detach = true;  // Prevent self-exit on channel-close.
+    // Prevent self-exit on channel-close.
+    Error detach_err = ERROR_INIT;
+    nvim__chan_set_detach(chan->id, true, &detach_err);
+    api_clear_error(&detach_err);
 
     // Server-side UI detach. Doesn't close the channel.
     Error err2 = ERROR_INIT;
@@ -6020,6 +6195,12 @@ static void ex_detach(exarg_T *eap)
     }
     // XXX: Can't do this, channel_decref() is async...
     // assert(!find_channel(chan->id));
+
+#ifdef MSWIN
+    // After UI/channel detach, move this server off the parent's console so it
+    // survives terminal closure and still has working CONIN$/CONOUT$.
+    os_swap_to_hidden_console();
+#endif
 
     ILOG("detach current_ui=%" PRId64, chan->id);
   }
@@ -6317,7 +6498,7 @@ static void ex_syncbind(exarg_T *eap)
     FOR_ALL_WINDOWS_IN_TAB(wp, curtab) {
       if (wp->w_p_scb && wp->w_buffer) {
         linenr_T y = plines_m_win_fill(wp, 1, wp->w_buffer->b_ml.ml_line_count)
-                     - get_scrolloff_value(curwin);
+                     - (int)get_scrolloff_value(curwin);
         vtopline = MIN(vtopline, y);
       }
     }
@@ -6411,7 +6592,7 @@ static void ex_read(exarg_T *eap)
 
 static char *prev_dir = NULL;
 
-#if defined(EXITFREE)
+#ifdef EXITFREE
 void free_cd_dir(void)
 {
   XFREE_CLEAR(prev_dir);
@@ -8267,23 +8448,11 @@ void set_pressedreturn(bool val)
 /// ":checkhealth [plugins]"
 static void ex_checkhealth(exarg_T *eap)
 {
-  Error err = ERROR_INIT;
-  MAXSIZE_TEMP_ARRAY(args, 2);
-
-  char mods[1024];
-  size_t mods_len = 0;
-  mods[0] = NUL;
-
-  if (cmdmod.cmod_tab > 0 || cmdmod.cmod_split != 0) {
-    bool multi_mods = false;
-    mods_len = add_win_cmd_modifiers(mods, &cmdmod, &multi_mods);
-    assert(mods_len < sizeof(mods));
-  }
-  ADD_C(args, STRING_OBJ(((String){ .data = mods, .size = mods_len })));
-  ADD_C(args, CSTR_AS_OBJ(eap->arg));
-
-  NLUA_EXEC_STATIC("vim.health._check(...)", args, kRetNilBool, NULL, &err);
-  if (!ERROR_SET(&err)) {
+  // Suppress the Lua error (E5108) so the VIMRUNTIME diagnostic is the primary error.
+  emsg_off++;
+  bool ok = nlua_call_excmd("vim.health", "_check", eap, &cmdmod, NULL);
+  emsg_off--;
+  if (ok) {
     return;
   }
 
@@ -8298,77 +8467,52 @@ static void ex_checkhealth(exarg_T *eap)
       emsg(_("E5009: Invalid 'runtimepath'"));
     }
   }
-  semsg_multiline("emsg", err.msg);
-  api_clear_error(&err);
 }
 
 static void ex_terminal(exarg_T *eap)
 {
-  char ex_cmd[1024];
-  size_t len = 0;
+  const int scroll_save = msg_scroll;
+  msg_scroll = false;
+  autowrite_all();
+  msg_scroll = scroll_save;
 
-  if (cmdmod.cmod_tab > 0 || cmdmod.cmod_split != 0) {
-    bool multi_mods = false;
-    // ex_cmd must be a null-terminated string before passing to add_win_cmd_modifiers
-    ex_cmd[0] = NUL;
-    len = add_win_cmd_modifiers(ex_cmd, &cmdmod, &multi_mods);
-    assert(len < sizeof(ex_cmd));
-    int result = snprintf(ex_cmd + len, sizeof(ex_cmd) - len, " new");
-    assert(result > 0);
-    len += (size_t)result;
+  if (*eap->arg != NUL) {
+    nlua_call_excmd("vim._core.ex_cmd", "ex_terminal", eap, &cmdmod, NULL);
   } else {
-    int result = snprintf(ex_cmd, sizeof(ex_cmd), "enew%s", eap->forceit ? "!" : "");
-    assert(result > 0);
-    len += (size_t)result;
-  }
-
-  assert(len < sizeof(ex_cmd));
-
-  if (*eap->arg != NUL) {  // Run {cmd} in 'shell'.
-    char *name = vim_strsave_escaped(eap->arg, "\"\\");
-    snprintf(ex_cmd + len, sizeof(ex_cmd) - len,
-             " | call jobstart(\"%s\",{'term':v:true})", name);
-    xfree(name);
-  } else {  // No {cmd}: run the job with tokenized 'shell'.
+    // No cmd given, run 'shell'.
     if (*p_sh == NUL) {
       emsg(_(e_shellempty));
       return;
     }
-
+    // Tokenize 'shell' via shell_build_argv (handles quoting) and pass as arg2.
     char **argv = shell_build_argv(NULL, NULL);
-    char **p = argv;
-    char tempstring[512];
-    char shell_argv[512] = { 0 };
-
-    while (*p != NULL) {
-      char *escaped = vim_strsave_escaped(*p, "\"\\");
-      snprintf(tempstring, sizeof(tempstring), ",\"%s\"", escaped);
-      xfree(escaped);
-      xstrlcat(shell_argv, tempstring, sizeof(shell_argv));
-      p++;
+    typval_T shell_tv;
+    tv_list_alloc_ret(&shell_tv, 0);
+    for (char **p = argv; *p; p++) {
+      tv_list_append_allocated_string(shell_tv.vval.v_list, *p);
     }
-    shell_free_argv(argv);
-
-    snprintf(ex_cmd + len, sizeof(ex_cmd) - len,
-             " | call jobstart([%s], {'term':v:true})", shell_argv + 1);
+    xfree(argv);
+    nlua_call_excmd("vim._core.ex_cmd", "ex_terminal", eap, &cmdmod, &shell_tv);
+    tv_clear(&shell_tv);
   }
+}
 
-  do_cmdline_cmd(ex_cmd);
+/// ":log {name}"
+static void ex_log(exarg_T *eap)
+{
+  nlua_call_excmd("vim._core.ex_cmd", "ex_log", eap, &cmdmod, NULL);
 }
 
 /// ":lsp {subcmd} {clients}"
 static void ex_lsp(exarg_T *eap)
 {
-  Error err = ERROR_INIT;
-  MAXSIZE_TEMP_ARRAY(args, 1);
+  nlua_call_excmd("vim._core.ex_cmd", "ex_lsp", eap, &cmdmod, NULL);
+}
 
-  ADD_C(args, CSTR_AS_OBJ(eap->arg));
-
-  NLUA_EXEC_STATIC("require'vim._core.ex_cmd'.ex_lsp(...)", args, kRetNilBool, NULL, &err);
-  if (ERROR_SET(&err)) {
-    emsg_multiline(err.msg, "lua_error", HLF_E, true);
-  }
-  api_clear_error(&err);
+/// ":uptime"
+static void ex_uptime(exarg_T *eap)
+{
+  nlua_call_excmd("vim._core.ex_cmd", "ex_uptime", eap, &cmdmod, NULL);
 }
 
 /// ":fclose"

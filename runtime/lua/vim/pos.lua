@@ -1,8 +1,7 @@
 ---@brief
 ---
---- EXPERIMENTAL: This API may change in the future. Its semantics are not yet finalized.
---- Subscribe to https://github.com/neovim/neovim/issues/25509
---- to stay updated or contribute to its development.
+--- EXPERIMENTAL: This API is unstable, do not use it. Its semantics are not yet finalized.
+--- Subscribe to this issue to stay updated: https://github.com/neovim/neovim/issues/25509
 ---
 --- Provides operations to compare, calculate, and convert positions represented by |vim.Pos|
 --- objects.
@@ -17,8 +16,8 @@ local validate = vim.validate
 ---
 --- Example:
 --- ```lua
---- local pos1 = vim.pos(3, 5)
---- local pos2 = vim.pos(4, 0)
+--- local pos1 = vim.pos(vim.api.nvim_get_current_buf(), 3, 5)
+--- local pos2 = vim.pos(vim.api.nvim_get_current_buf(), 4, 0)
 ---
 --- -- Operators are overloaded for comparing two `vim.Pos` objects.
 --- if pos1 < pos2 then
@@ -36,36 +35,42 @@ local validate = vim.validate
 ---@class vim.Pos
 ---@field row integer 0-based byte index.
 ---@field col integer 0-based byte index.
----
---- Optional buffer handle.
----
---- When specified, it indicates that this position belongs to a specific buffer.
---- This field is required when performing position conversions.
----@field buf? integer
-local Pos = {}
-Pos.__index = Pos
+---@field buf integer buffer handle.
+---@field private [1] integer underlying representation of row
+---@field private [2] integer underlying representation of col
+---@field private [3] integer underlying representation of buf
+local M = {}
 
----@class vim.Pos.Optional
----@inlinedoc
----@field buf? integer
+---@private
+---@param pos vim.Pos
+---@param key any
+function M.__index(pos, key)
+  if key == 'row' then
+    return pos[1]
+  elseif key == 'col' then
+    return pos[2]
+  elseif key == 'buf' then
+    return pos[3]
+  end
+
+  return M[key]
+end
 
 ---@package
+---@param buf integer
 ---@param row integer
 ---@param col integer
----@param opts? vim.Pos.Optional
-function Pos.new(row, col, opts)
+function M.new(buf, row, col)
+  validate('buf', buf, 'number')
   validate('row', row, 'number')
   validate('col', col, 'number')
-  validate('opts', opts, 'table', true)
-
-  opts = opts or {}
 
   ---@type vim.Pos
   local self = setmetatable({
-    row = row,
-    col = col,
-    buf = opts.buf,
-  }, Pos)
+    row,
+    col,
+    buf,
+  }, M)
 
   return self
 end
@@ -93,17 +98,17 @@ local function cmp_pos(p1, p2)
 end
 
 ---@private
-function Pos.__lt(...)
+function M.__lt(...)
   return cmp_pos(...) == -1
 end
 
 ---@private
-function Pos.__le(...)
+function M.__le(...)
   return cmp_pos(...) ~= 1
 end
 
 ---@private
-function Pos.__eq(...)
+function M.__eq(...)
   return cmp_pos(...) == 0
 end
 
@@ -118,21 +123,19 @@ end
 ---
 --- Example:
 --- ```lua
---- -- `buf` is required for conversion to LSP position.
 --- local buf = vim.api.nvim_get_current_buf()
---- local pos = vim.pos(3, 5, { buf = buf })
+--- local pos = vim.pos(buf, 3, 5)
 ---
 --- -- Convert to LSP position, you can call it in a method style.
---- local lsp_pos = pos:lsp('utf-16')
+--- local lsp_pos = pos:to_lsp('utf-16')
 --- ```
 ---@param pos vim.Pos
 ---@param position_encoding lsp.PositionEncodingKind
-function Pos.to_lsp(pos, position_encoding)
+function M.to_lsp(pos, position_encoding)
   validate('pos', pos, 'table')
   validate('position_encoding', position_encoding, 'string')
 
-  local buf = assert(pos.buf, 'position is not a buffer position')
-  local row, col = pos.row, pos.col
+  local buf, row, col = pos.buf, pos.row, pos.col
   -- When on the first character,
   -- we can ignore the difference between byte and character.
   if col > 0 then
@@ -153,13 +156,12 @@ end
 ---   character = 5
 --- }
 ---
---- -- `buf` is mandatory, as LSP positions are always associated with a buffer.
 --- local pos = vim.pos.lsp(buf, lsp_pos, 'utf-16')
 --- ```
 ---@param buf integer
 ---@param pos lsp.Position
 ---@param position_encoding lsp.PositionEncodingKind
-function Pos.lsp(buf, pos, position_encoding)
+function M.lsp(buf, pos, position_encoding)
   validate('buf', buf, 'number')
   validate('pos', pos, 'table')
   validate('position_encoding', position_encoding, 'string')
@@ -173,42 +175,53 @@ function Pos.lsp(buf, pos, position_encoding)
     col = vim.str_byteindex(get_line(buf, row), position_encoding, col, false)
   end
 
-  return Pos.new(row, col, { buf = buf })
+  return M.new(buf, row, col)
 end
 
---- Converts |vim.Pos| to cursor position.
+--- Converts |vim.Pos| to cursor position (see |api-indexing|).
 ---@param pos vim.Pos
----@return [integer, integer]
-function Pos.to_cursor(pos)
-  return { pos.row + 1, pos.col }
+---@return integer, integer
+function M.to_cursor(pos)
+  return pos.row + 1, pos.col
 end
 
---- Creates a new |vim.Pos| from cursor position.
+--- Creates a new |vim.Pos| from cursor position (see |api-indexing|).
+---@param buf integer
 ---@param pos [integer, integer]
-function Pos.cursor(pos)
-  return Pos.new(pos[1] - 1, pos[2])
+function M.cursor(buf, pos)
+  return M.new(buf, pos[1] - 1, pos[2])
 end
 
---- Converts |vim.Pos| to extmark position.
+--- Converts |vim.Pos| to extmark position (see |api-indexing|).
 ---@param pos vim.Pos
----@return [integer, integer]
-function Pos.to_extmark(pos)
-  return { pos.row, pos.col }
+---@return integer, integer
+function M.to_extmark(pos)
+  local line_count = api.nvim_buf_line_count(pos.buf)
+
+  local row = pos.row
+  local col = pos.col
+  if pos.col == 0 and pos.row == line_count then
+    row = row - 1
+    col = #get_line(pos.buf, row)
+  end
+
+  return row, col
 end
 
---- Creates a new |vim.Pos| from extmark position.
----@param pos [integer, integer]
-function Pos.extmark(pos)
-  local row, col = unpack(pos)
-  return Pos.new(row, col)
+--- Creates a new |vim.Pos| from extmark position (see |api-indexing|).
+---@param buf integer
+---@param row integer
+---@param col integer
+function M.extmark(buf, row, col)
+  return M.new(buf, row, col)
 end
 
 -- Overload `Range.new` to allow calling this module as a function.
-setmetatable(Pos, {
+setmetatable(M, {
   __call = function(_, ...)
-    return Pos.new(...)
+    return M.new(...)
   end,
 })
----@cast Pos +fun(row: integer, col: integer, opts: vim.Pos.Optional?): vim.Pos
+---@cast M +fun(buf: integer, row: integer, col: integer): vim.Pos
 
-return Pos
+return M

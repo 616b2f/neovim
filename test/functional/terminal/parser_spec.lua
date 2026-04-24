@@ -80,16 +80,29 @@ describe(':terminal', function()
 
     send_osc_with_terminator(BEL)
     --- @type string
-    assert.same(
+    assert.eq(
       { sequence = OSC_PREFIX .. '10;?', terminator = BEL },
       exec_lua([[return _G.osc10_response]])
     )
 
     send_osc_with_terminator(ST)
     --- @type string
-    assert.same(
+    assert.eq(
       { sequence = OSC_PREFIX .. '10;?', terminator = ST },
       exec_lua([[return _G.osc10_response]])
     )
+  end)
+
+  it('does not leak pending TermRequest on buffer destroy #39332', function()
+    -- Send all OSC sequences in one exec_lua so that the event loop does not drain between the sends.
+    exec_lua(function(prefix, st)
+      local buf = vim.api.nvim_create_buf(false, true)
+      local chan = vim.api.nvim_open_term(buf, {})
+      vim.api.nvim_create_autocmd('TermRequest', { buffer = buf, callback = function() end })
+      vim.api.nvim_chan_send(chan, prefix .. '7;file:///a' .. st)
+      vim.api.nvim_chan_send(chan, prefix .. '7;file:///b' .. st)
+      vim.api.nvim_buf_delete(buf, { force = true })
+    end, OSC_PREFIX, ST)
+    assert_alive()
   end)
 end)

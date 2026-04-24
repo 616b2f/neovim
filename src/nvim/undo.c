@@ -158,7 +158,7 @@ static bool undo_undoes = false;
 
 static int lastmark = 0;
 
-#if defined(U_DEBUG)
+#ifdef U_DEBUG
 // Check the undo structures for being valid.  Print a warning when something
 // looks wrong.
 static int seen_b_u_curhead;
@@ -382,7 +382,7 @@ int u_savecommon(buf_T *buf, linenr_T top, linenr_T bot, linenr_T newbot, bool r
   u_entry_T *prev_uep;
   linenr_T size = bot - top - 1;
 
-  // If buf->b_u_synced == true make a new header.
+  // If buf->b_u_synced is true make a new header.
   if (buf->b_u_synced) {
     // Need to create new entry in b_changelist.
     buf->b_new_change = true;
@@ -688,9 +688,10 @@ char *u_get_undo_file_name(const char *const buf_ffname, const bool reading)
 #endif
 
   char dir_name[MAXPATHL + 1];
-  char *munged_name = NULL;
+  String munged_name = STRING_INIT;
   char *undo_file_name = NULL;
 
+  const size_t ffname_len = strlen(ffname);
   // Loop over 'undodir'.  When reading find the first file that exists.
   // When not reading use the first directory that exists or ".".
   char *dirp = p_udir;
@@ -699,11 +700,10 @@ char *u_get_undo_file_name(const char *const buf_ffname, const bool reading)
     if (dir_len == 1 && dir_name[0] == '.') {
       // Use same directory as the ffname,
       // "dir/name" -> "dir/.name.un~"
-      const size_t ffname_len = strlen(ffname);
       undo_file_name = xmalloc(ffname_len + 6);
       memmove(undo_file_name, ffname, ffname_len + 1);
       char *const tail = path_tail(undo_file_name);
-      const size_t tail_len = strlen(tail);
+      const size_t tail_len = ffname_len - (size_t)(tail - undo_file_name);
       memmove(tail + 1, tail, tail_len + 1);
       *tail = '.';
       memmove(tail + tail_len + 1, ".un~", sizeof(".un~"));
@@ -711,9 +711,8 @@ char *u_get_undo_file_name(const char *const buf_ffname, const bool reading)
       dir_name[dir_len] = NUL;
 
       // Remove trailing pathseps from directory name
-      char *p = &dir_name[dir_len - 1];
-      while (vim_ispathsep(*p)) {
-        *p-- = NUL;
+      while (dir_len > 1 && vim_ispathsep_nocolon(dir_name[dir_len - 1])) {
+        dir_name[--dir_len] = NUL;
       }
 
       bool has_directory = os_isdir(dir_name);
@@ -730,15 +729,16 @@ char *u_get_undo_file_name(const char *const buf_ffname, const bool reading)
         }
       }
       if (has_directory) {
-        if (munged_name == NULL) {
-          munged_name = xstrdup(ffname);
-          for (char *c = munged_name; *c != NUL; MB_PTR_ADV(c)) {
-            if (vim_ispathsep(*c)) {
-              *c = '%';
+        if (munged_name.data == NULL) {
+          munged_name = cbuf_to_string(ffname, ffname_len);
+          for (char *p = munged_name.data; *p != NUL; MB_PTR_ADV(p)) {
+            if (vim_ispathsep(*p)) {
+              *p = '%';
             }
           }
         }
-        undo_file_name = concat_fnames(dir_name, munged_name, true);
+        undo_file_name = concat_fnames(cbuf_as_string(dir_name, dir_len),
+                                       munged_name, true).data;
       }
     }
 
@@ -750,7 +750,7 @@ char *u_get_undo_file_name(const char *const buf_ffname, const bool reading)
     XFREE_CLEAR(undo_file_name);
   }
 
-  xfree(munged_name);
+  xfree(munged_name.data);
   return undo_file_name;
 }
 
@@ -1772,7 +1772,7 @@ void u_undo(int count)
   // If we get an undo command while executing a macro, we behave like the
   // original vi. If this happens twice in one macro the result will not
   // be compatible.
-  if (curbuf->b_u_synced == false) {
+  if (!curbuf->b_u_synced) {
     u_sync(true);
     count = 1;
   }
@@ -1925,7 +1925,7 @@ void undo_time(int step, bool sec, bool file, bool absolute)
   }
 
   // First make sure the current undoable change is synced.
-  if (curbuf->b_u_synced == false) {
+  if (!curbuf->b_u_synced) {
     u_sync(true);
   }
 

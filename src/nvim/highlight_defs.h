@@ -45,6 +45,7 @@ typedef struct {
   int16_t cterm_fg_color, cterm_bg_color;
   int32_t hl_blend;
   int32_t url;
+  int32_t font;
 } HlAttrs;
 
 #define HLATTRS_INIT (HlAttrs) { \
@@ -57,6 +58,7 @@ typedef struct {
   .cterm_bg_color = 0, \
   .hl_blend = -1, \
   .url = -1, \
+  .font = -1, \
 }
 
 /// Values for index in highlight_attr[].
@@ -179,4 +181,4 @@ typedef struct {
 #define COLOR_ITEM_INITIALIZER { .attr_id = -1, .link_id = -1, .version = -1, \
                                  .is_default = false, .link_global = false }
 
-enum { HLATTRS_DICT_SIZE = 20, };
+enum { HLATTRS_DICT_SIZE = 24, };

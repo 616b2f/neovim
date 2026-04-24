@@ -34,10 +34,17 @@ do
   })
 
   vim.api.nvim_create_user_command('Open', function(cmd)
-    vim.ui.open(assert(cmd.fargs[1]))
+    if #cmd.fargs == 0 then
+      local current_file = vim.fn.expand('%')
+      if current_file ~= '' then
+        vim.ui.open(current_file)
+      end
+    else
+      vim.ui.open(cmd.fargs[1])
+    end
   end, {
     desc = 'Open file with system default handler. See :help vim.ui.open()',
-    nargs = 1,
+    nargs = '?',
     complete = 'file',
   })
 end
@@ -288,17 +295,17 @@ do
     )
   end
 
+  --- Execute a command and print errors without a stacktrace.
+  --- @param opts vim.api.keyset.cmd Arguments to |nvim_cmd()|
+  local function cmd(opts)
+    local ok, err = pcall(vim.api.nvim_cmd, opts, {})
+    if not ok then
+      vim.api.nvim_echo({ { err:sub(#'Vim:' + 1) } }, true, { err = true })
+    end
+  end
+
   --- vim-unimpaired style mappings. See: https://github.com/tpope/vim-unimpaired
   do
-    --- Execute a command and print errors without a stacktrace.
-    --- @param opts table Arguments to |nvim_cmd()|
-    local function cmd(opts)
-      local ok, err = pcall(vim.api.nvim_cmd, opts, {})
-      if not ok then
-        vim.api.nvim_echo({ { err:sub(#'Vim:' + 1) } }, true, { err = true })
-      end
-    end
-
     -- Quickfix mappings
     vim.keymap.set('n', '[q', function()
       cmd({ cmd = 'cprevious', count = vim.v.count1 })
@@ -459,6 +466,14 @@ do
       require 'vim.treesitter._select'.select_next(vim.v.count1)
     end, { desc = 'Select next node' })
 
+    vim.keymap.set({ 'x' }, '[N', function()
+      require 'vim.treesitter._select'.select_grow_prev(vim.v.count1)
+    end, { desc = 'Select expand previous node' })
+
+    vim.keymap.set({ 'x' }, ']N', function()
+      require 'vim.treesitter._select'.select_grow_next(vim.v.count1)
+    end, { desc = 'Select expand next node' })
+
     vim.keymap.set({ 'x', 'o' }, 'an', function()
       if vim.treesitter.get_parser(nil, nil, { error = false }) then
         require 'vim.treesitter._select'.select_parent(vim.v.count1)
@@ -617,7 +632,7 @@ do
         -- TermClose may be queued before TermOpen if process exits before `terminal_open` is called.
         -- Don't display the msg now, let TermOpen display it.
         vim.api.nvim_create_autocmd('TermOpen', {
-          buffer = ev.buf,
+          buf = ev.buf,
           once = true,
           callback = function()
             set_terminal_exitmsg(ev.buf, msg, pos)
@@ -773,7 +788,8 @@ do
       vim.v.swapchoice = 'e' -- Choose "(E)dit".
       vim.notify(
         ('W325: Ignoring swapfile from Nvim process %d'):format(info.pid),
-        vim.log.levels.WARN
+        vim.log.levels.WARN,
+        { _truncate = true }
       )
     end,
   })
@@ -781,7 +797,7 @@ do
   -- Check if a TTY is attached
   local tty = nil
   for _, ui in ipairs(vim.api.nvim_list_uis()) do
-    if ui.chan == 1 and ui.stdout_tty then
+    if ui.stdout_tty then
       tty = ui
       break
     end
@@ -984,7 +1000,8 @@ do
       then
         vim.notify(
           'defaults.lua: Did not detect DSR response from terminal. This results in a slower startup time.',
-          vim.log.levels.WARN
+          vim.log.levels.WARN,
+          { _truncate = true }
         )
       end
     end
@@ -1004,7 +1021,7 @@ do
         -- Neither the TUI nor $COLORTERM indicate that truecolor is supported, so query the
         -- terminal
         local caps = {} ---@type table<string, boolean>
-        require('vim.termcap').query({ 'Tc', 'RGB', 'setrgbf', 'setrgbb' }, function(cap, found)
+        require('vim.tty').query({ 'Tc', 'RGB', 'setrgbf', 'setrgbb' }, function(cap, found)
           if not found then
             return
           end

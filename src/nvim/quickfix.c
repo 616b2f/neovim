@@ -1777,11 +1777,11 @@ static void wipe_qf_buffer(qf_info_T *qi)
   buf_T *const qfbuf = buflist_findnr(qi->qf_bufnr);
   if (qfbuf != NULL && qfbuf->b_nwindows == 0) {
     bool buf_was_null = false;
-    // can happen when curwin is going to be closed e.g. curwin->w_buffer
-    // was already closed in win_close(), and we are now closing the
-    // window related location list buffer from win_free_mem()
-    // but close_buffer() calls CHECK_CURBUF() macro and requires
-    // curwin->w_buffer == curbuf
+    // Can happen when curwin is closing (e.g: w_buffer was unloaded in
+    // win_close()) and we are now closing the window-related location list
+    // buffer from win_free().  close_buffer() calls CHECK_CURBUF() and
+    // requires curwin->w_buffer == curbuf.  Should be OK to not increment
+    // b_nwindows, especially as autocmds are blocked in win_free().
     if (curwin->w_buffer == NULL) {
       curwin->w_buffer = curbuf;
       buf_was_null = true;
@@ -1789,7 +1789,7 @@ static void wipe_qf_buffer(qf_info_T *qi)
 
     // If the quickfix buffer is not loaded in any window, then
     // wipe the buffer.
-    close_buffer(NULL, qfbuf, DOBUF_WIPE, false, false);
+    close_buffer(NULL, qfbuf, DOBUF_WIPE, false, false, false);
     qi->qf_bufnr = INVALID_QFBUFNR;
     if (buf_was_null) {
       curwin->w_buffer = NULL;
@@ -1886,7 +1886,7 @@ static void decr_quickfix_busy(void)
 #endif
 }
 
-#if defined(EXITFREE)
+#ifdef EXITFREE
 void check_quickfix_busy(void)
 {
   if (quickfix_busy != 0) {
@@ -2307,8 +2307,8 @@ void copy_loclist_stack(win_T *from, win_T *to)
 /// Also sets the b_has_qf_entry flag.
 static int qf_get_fnum(qf_list_T *qfl, char *directory, char *fname)
 {
-  char *ptr = NULL;
-  char *bufname;
+  String ptr = STRING_INIT;
+  String bufname;
   buf_T *buf;
   if (fname == NULL || *fname == NUL) {         // no file name
     return 0;
@@ -2320,43 +2320,43 @@ static int qf_get_fnum(qf_list_T *qfl, char *directory, char *fname)
   }
   slash_adjust(fname);
 #endif
+  String fname_str = cstr_as_string(fname);
   if (directory != NULL && !vim_isAbsName(fname)) {
-    ptr = concat_fnames(directory, fname, true);
+    ptr = concat_fnames(cstr_as_string(directory), fname_str, true);
     // Here we check if the file really exists.
     // This should normally be true, but if make works without
     // "leaving directory"-messages we might have missed a
     // directory change.
-    if (!os_path_exists(ptr)) {
-      xfree(ptr);
+    if (!os_path_exists(ptr.data)) {
+      xfree(ptr.data);
       directory = qf_guess_filepath(qfl, fname);
       if (directory) {
-        ptr = concat_fnames(directory, fname, true);
+        ptr = concat_fnames(cstr_as_string(directory), fname_str, true);
       } else {
-        ptr = xstrdup(fname);
+        ptr = copy_string(fname_str, NULL);
       }
     }
     // Use concatenated directory name and file name.
     bufname = ptr;
   } else {
-    bufname = fname;
+    bufname = fname_str;
   }
 
-  if (qf_last_bufname != NULL
-      && strcmp(bufname, qf_last_bufname) == 0
+  if (qf_last_bufname != NULL && strcmp(bufname.data, qf_last_bufname) == 0
       && bufref_valid(&qf_last_bufref)) {
     buf = qf_last_bufref.br_buf;
-    xfree(ptr);
+    xfree(ptr.data);
   } else {
     xfree(qf_last_bufname);
-    buf = buflist_new(bufname, NULL, 0, BLN_NOOPT);
-    qf_last_bufname = (bufname == ptr) ? bufname : xstrdup(bufname);
+    buf = buflist_new(bufname.data, NULL, 0, BLN_NOOPT);
+    qf_last_bufname = (bufname.data == ptr.data)
+                      ? bufname.data : xmemdupz(bufname.data, bufname.size);
     set_bufref(&qf_last_bufref, buf);
   }
   if (buf == NULL) {
     return 0;
   }
-  buf->b_has_qf_entry =
-    IS_QF_LIST(qfl) ? BUF_HAS_QF_ENTRY : BUF_HAS_LL_ENTRY;
+  buf->b_has_qf_entry = IS_QF_LIST(qfl) ? BUF_HAS_QF_ENTRY : BUF_HAS_LL_ENTRY;
   return buf->b_fnum;
 }
 
@@ -2382,16 +2382,18 @@ static char *qf_push_dir(char *dirbuf, struct dir_stack_T **stackptr, bool is_fi
     // Okay we don't have an absolute path.
     // dirbuf must be a subdir of one of the directories on the stack.
     // Let's search...
+    size_t dirbuf_len = strlen(dirbuf);
     ds_new = (*stackptr)->next;
     (*stackptr)->dirname = NULL;
     while (ds_new) {
-      char *dirname = concat_fnames(ds_new->dirname, dirbuf, true);
-      if (os_isdir(dirname)) {
+      String dirname = concat_fnames(cstr_as_string(ds_new->dirname),
+                                     cbuf_as_string(dirbuf, dirbuf_len), true);
+      if (os_isdir(dirname.data)) {
         xfree((*stackptr)->dirname);
-        (*stackptr)->dirname = dirname;
+        (*stackptr)->dirname = dirname.data;
         break;
       }
-      xfree(dirname);
+      xfree(dirname.data);
       ds_new = ds_new->next;
     }
 
@@ -2406,7 +2408,7 @@ static char *qf_push_dir(char *dirbuf, struct dir_stack_T **stackptr, bool is_fi
     // Nothing found -> it must be on top level
     if (ds_new == NULL) {
       xfree((*stackptr)->dirname);
-      (*stackptr)->dirname = xstrdup(dirbuf);
+      (*stackptr)->dirname = xmemdupz(dirbuf, dirbuf_len);
     }
   }
 
@@ -2479,19 +2481,20 @@ static char *qf_guess_filepath(qf_list_T *qfl, char *filename)
   }
 
   struct dir_stack_T *ds_ptr = qfl->qf_dir_stack->next;
-  char *fullname = NULL;
+  String fullname = STRING_INIT;
+  String filename_str = cstr_as_string(filename);
   while (ds_ptr) {
-    xfree(fullname);
-    fullname = concat_fnames(ds_ptr->dirname, filename, true);
+    xfree(fullname.data);
+    fullname = concat_fnames(cstr_as_string(ds_ptr->dirname), filename_str, true);
 
-    if (os_path_exists(fullname)) {
+    if (os_path_exists(fullname.data)) {
       break;
     }
 
     ds_ptr = ds_ptr->next;
   }
 
-  xfree(fullname);
+  xfree(fullname.data);
 
   // clean up all dirs we already left
   while (qfl->qf_dir_stack->next != ds_ptr) {
@@ -6079,7 +6082,7 @@ static void unload_dummy_buffer(buf_T *buf, char *dirname_start)
     return;
   }
 
-  close_buffer(NULL, buf, DOBUF_UNLOAD, false, true);
+  close_buffer(NULL, buf, DOBUF_UNLOAD, false, true, false);
 
   // When autocommands/'autochdir' option changed directory: go back.
   restore_start_dir(dirname_start);
@@ -6101,6 +6104,7 @@ static int get_qfline_items(qfline_T *qfp, list_T *list)
   char buf[2];
   buf[0] = qfp->qf_type;
   buf[1] = NUL;
+  size_t buflen = (buf[0] == NUL) ? 0 : 1;
   if (tv_dict_add_nr(dict, S_LEN("bufnr"), (varnumber_T)bufnum) == FAIL
       || (tv_dict_add_nr(dict, S_LEN("lnum"), (varnumber_T)qfp->qf_lnum) == FAIL)
       || (tv_dict_add_nr(dict, S_LEN("end_lnum"), (varnumber_T)qfp->qf_end_lnum) == FAIL)
@@ -6113,7 +6117,7 @@ static int get_qfline_items(qfline_T *qfp, list_T *list)
       || (tv_dict_add_str(dict, S_LEN("pattern"), (qfp->qf_pattern == NULL ? "" : qfp->qf_pattern))
           == FAIL)
       || (tv_dict_add_str(dict, S_LEN("text"), (qfp->qf_text == NULL ? "" : qfp->qf_text)) == FAIL)
-      || (tv_dict_add_str(dict, S_LEN("type"), buf) == FAIL)
+      || (tv_dict_add_str_len(dict, S_LEN("type"), buf, (int)buflen) == FAIL)
       || (qfp->qf_user_data.v_type != VAR_UNKNOWN
           && tv_dict_add_tv(dict, S_LEN("user_data"), &qfp->qf_user_data) == FAIL)
       || (tv_dict_add_nr(dict, S_LEN("valid"), (varnumber_T)qfp->qf_valid) == FAIL)) {
@@ -6369,7 +6373,7 @@ static int qf_getprop_defaults(qf_info_T *qi, int flags, int locstack, dict_T *r
   int status = OK;
 
   if (flags & QF_GETLIST_TITLE) {
-    status = tv_dict_add_str(retdict, S_LEN("title"), "");
+    status = tv_dict_add_str_len(retdict, S_LEN("title"), "", 0);
   }
   if ((status == OK) && (flags & QF_GETLIST_ITEMS)) {
     list_T *l = tv_list_alloc(kListLenMayKnow);
@@ -6382,7 +6386,7 @@ static int qf_getprop_defaults(qf_info_T *qi, int flags, int locstack, dict_T *r
     status = tv_dict_add_nr(retdict, S_LEN("winid"), qf_winid(qi));
   }
   if ((status == OK) && (flags & QF_GETLIST_CONTEXT)) {
-    status = tv_dict_add_str(retdict, S_LEN("context"), "");
+    status = tv_dict_add_str_len(retdict, S_LEN("context"), "", 0);
   }
   if ((status == OK) && (flags & QF_GETLIST_ID)) {
     status = tv_dict_add_nr(retdict, S_LEN("id"), 0);
@@ -6403,7 +6407,7 @@ static int qf_getprop_defaults(qf_info_T *qi, int flags, int locstack, dict_T *r
     status = qf_getprop_qfbufnr(qi, retdict);
   }
   if ((status == OK) && (flags & QF_GETLIST_QFTF)) {
-    status = tv_dict_add_str(retdict, S_LEN("quickfixtextfunc"), "");
+    status = tv_dict_add_str_len(retdict, S_LEN("quickfixtextfunc"), "", 0);
   }
 
   return status;
@@ -6457,7 +6461,7 @@ static int qf_getprop_ctx(qf_list_T *qfl, dict_T *retdict)
       tv_dict_item_free(di);
     }
   } else {
-    status = tv_dict_add_str(retdict, S_LEN("context"), "");
+    status = tv_dict_add_str_len(retdict, S_LEN("context"), "", 0);
   }
 
   return status;
@@ -6491,7 +6495,7 @@ static int qf_getprop_qftf(qf_list_T *qfl, dict_T *retdict)
     status = tv_dict_add_tv(retdict, S_LEN("quickfixtextfunc"), &tv);
     tv_clear(&tv);
   } else {
-    status = tv_dict_add_str(retdict, S_LEN("quickfixtextfunc"), "");
+    status = tv_dict_add_str_len(retdict, S_LEN("quickfixtextfunc"), "", 0);
   }
 
   return status;
@@ -7665,7 +7669,7 @@ void ex_helpgrep(exarg_T *eap)
   }
 }
 
-#if defined(EXITFREE)
+#ifdef EXITFREE
 void free_quickfix(void)
 {
   qf_free_all(NULL);

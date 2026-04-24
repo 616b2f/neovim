@@ -632,7 +632,7 @@ M.cmds = {
   },
   {
     command = 'connect',
-    flags = bit.bor(BANG, WORD1, NOTRLCOM, NEEDARG),
+    flags = bit.bor(BANG, FILE1, NOTRLCOM, NEEDARG),
     addr_type = 'ADDR_NONE',
     func = 'ex_connect',
   },
@@ -1585,6 +1585,12 @@ M.cmds = {
     flags = bit.bor(BANG, EXTRA, NEEDARG, SBOXOK, CMDWIN, LOCK_OK),
     addr_type = 'ADDR_NONE',
     func = 'ex_lockvar',
+  },
+  {
+    command = 'log',
+    flags = bit.bor(EXTRA, TRLBAR),
+    addr_type = 'ADDR_NONE',
+    func = 'ex_log',
   },
   {
     command = 'lolder',
@@ -3070,6 +3076,12 @@ M.cmds = {
     flags = bit.bor(RANGE, WHOLEFOLD, BANG, FILE1, ARGOPT, DFLALL, TRLBAR),
     addr_type = 'ADDR_POSITIONS',
     func = 'ex_update',
+  },
+  {
+    command = 'uptime',
+    flags = bit.bor(CMDWIN, LOCK_OK),
+    addr_type = 'ADDR_NONE',
+    func = 'ex_uptime',
   },
   {
     command = 'vglobal',

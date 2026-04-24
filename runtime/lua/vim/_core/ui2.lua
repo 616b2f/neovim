@@ -32,7 +32,7 @@
 ---
 --- There are four special windows/buffers for presenting messages and cmdline:
 --- - "cmd": Cmdline. Also used for 'showcmd', 'showmode', 'ruler', and messages by default.
---- - "msg": Message window, shows fleeting messages useful for 'cmdheight' == 0.
+--- - "msg": Message window, shows ephemeral messages useful for 'cmdheight' == 0.
 --- - "pager": Pager window, shows |:messages| and certain messages that are never "collapsed".
 --- - "dialog": Dialog window, shows modal prompts that expect user input.
 ---
@@ -43,7 +43,7 @@
 --- Unlike the legacy |hit-enter| prompt, messages exceeding 'cmdheight' are
 --- instead "collapsed", followed by a `[+x]` "spill" indicator, where `x`
 --- indicates the spilled lines. To see the full messages, do either:
---- - ENTER immediately after a message from interactive |:| cmdline.
+--- - ENTER immediately after interactive |:| cmdline shows a message and returns to |Normal-mode|.
 --- - |g<| at any time.
 
 local api = vim.api
@@ -88,7 +88,7 @@ function M.check_targets()
 
     if not win or not floating then
       -- Open a new window when closed or no longer floating (e.g. wincmd J).
-      local cfg = { col = 0, row = 1, width = 10000, height = 1, mouse = false, noautocmd = true }
+      local cfg = { col = 0, row = 1, width = 10000, height = 1, noautocmd = true }
       cfg.focusable = false
       cfg.style = 'minimal'
       cfg.relative = 'laststatus'
@@ -130,6 +130,8 @@ function M.check_targets()
           hl = 'Normal:MsgArea'
         elseif type == 'msg' then
           hl = search_hide
+        elseif type == 'cmd' then
+          api.nvim_set_option_value('winpinned', true, { scope = 'local' })
         end
         api.nvim_set_option_value('winhighlight', hl, { scope = 'local' })
       end)
@@ -168,6 +170,7 @@ local scheduled_ui_callback = vim.schedule_wrap(ui_callback)
 
 ---@nodoc
 function M.enable(opts)
+  opts = opts or {}
   vim.validate('opts', opts, 'table', true)
   M.cfg = vim.tbl_deep_extend('keep', opts, M.cfg)
   M.cfg.msg.target = type(M.cfg.msg.targets) == 'string' and M.cfg.msg.targets or M.cfg.msg.target
@@ -236,8 +239,12 @@ function M.enable(opts)
 
   api.nvim_create_autocmd({ 'VimResized', 'TabEnter' }, {
     group = M.augroup,
-    callback = function()
+    callback = function(ev)
       M.check_targets()
+      -- After a tabpage was closed unhide the msg window on the current tabpage.
+      if ev.event == 'TabEnter' and next(M.msg.msg.ids) ~= nil then
+        api.nvim_win_set_config(M.wins.msg, { hide = false, width = M.msg.msg.width })
+      end
       M.msg.set_pos()
     end,
     desc = 'Set cmdline and message window dimensions after shell resize or tabpage change.',

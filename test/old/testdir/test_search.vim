@@ -642,6 +642,27 @@ func Test_search_cmdline7()
   call feedkeys("//e\<c-g>\<cr>", 'tx')
   call assert_equal('1 bbvimb', getline('.'))
   call assert_equal(4, col('.'))
+  call cursor(1, 1)
+  call feedkeys("//+1\<c-g>\<cr>", 'tx')
+  call assert_equal(' 2 bbvimb', getline('.'))
+  call assert_equal([0, 2, 1, 0], getpos('.'))
+  call setline(1, ['blah blah blah'])
+  call feedkeys("gg0/blah/e\<c-g>\<cr>", 'tx')
+  call assert_equal([0, 1, 9, 0], getpos('.'))
+  call feedkeys("gg0/blah/e\<c-g>\<c-g>\<cr>", 'tx')
+  call assert_equal([0, 1, 14, 0], getpos('.'))
+  call feedkeys("gg0/blah/e\<c-g>\<c-g>\<c-t>\<cr>", 'tx')
+  call assert_equal([0, 1, 9, 0], getpos('.'))
+  call cursor(1, col('$'))
+  call feedkeys("?blah?e\<c-g>\<cr>", 'tx')
+  call assert_equal([0, 1, 9, 0], getpos('.'))
+  call feedkeys("gg0/blah/e+1\<c-g>\<cr>", 'tx')
+  call assert_equal([0, 1, 10, 0], getpos('.'))
+  call feedkeys("gg0/blah/e-2\<c-g>\<cr>", 'tx')
+  call assert_equal([0, 1, 7, 0], getpos('.'))
+  call setline(1, ['a/b a/b a/b'])
+  call feedkeys("gg0/a\\/b/e\<c-g>\<cr>", 'tx')
+  call assert_equal([0, 1, 7, 0], getpos('.'))
 
   set noincsearch
   call Ntest_override("char_avail", 0)
@@ -1256,6 +1277,31 @@ func Test_incsearch_sort_dump()
 
   call term_sendkeys(buf, ':sort! /on')
   call VerifyScreenDump(buf, 'Test_incsearch_sort_02', {})
+  call term_sendkeys(buf, "\<Esc>")
+
+  call StopVimInTerminal(buf)
+endfunc
+
+" Similar to Test_incsearch_sort_dump() for :uniq
+func Test_incsearch_uniq_dump()
+  CheckOption incsearch
+  CheckScreendump
+
+  call writefile([
+	\ 'set incsearch hlsearch scrolloff=0',
+	\ 'call setline(1, ["another one 2", "that one 3", "the one 1"])',
+	\ ], 'Xis_uniq_script', 'D')
+  let buf = RunVimInTerminal('-S Xis_uniq_script', {'rows': 9, 'cols': 70})
+  " Give Vim a chance to redraw to get rid of the spaces in line 2 caused by
+  " the 'ambiwidth' check.
+  sleep 100m
+
+  call term_sendkeys(buf, ':uniq /on')
+  call VerifyScreenDump(buf, 'Test_incsearch_uniq_01', {})
+  call term_sendkeys(buf, "\<Esc>")
+
+  call term_sendkeys(buf, ':uniq! /on')
+  call VerifyScreenDump(buf, 'Test_incsearch_uniq_02', {})
   call term_sendkeys(buf, "\<Esc>")
 
   call StopVimInTerminal(buf)

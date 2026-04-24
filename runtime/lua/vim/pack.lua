@@ -12,7 +12,8 @@
 ---
 ---Uses Git to manage plugins and requires present `git` executable.
 ---Target plugins should be Git repositories with versions as named tags
----following semver convention `v<major>.<minor>.<patch>`.
+---following semver convention `v<major>.<minor>.<patch>` (with or without `v` prefix).
+---Like `v1.2.0` or `1.2.0`, but not `1.2` or `v1`.
 ---
 ---The latest state of all managed plugins is stored inside a [vim.pack-lockfile]()
 ---located at `$XDG_CONFIG_HOME/nvim/nvim-pack-lock.json`. It is a JSON file that
@@ -138,7 +139,9 @@
 ---- On secondary machine:
 ---     - Pull from the server.
 ---     - |:restart|. New plugins (not present locally, but present in the lockfile)
----       are installed at proper revision.
+---       are installed at proper revision. If some installation has failed but
+---       you know it should not (like due to bad Internet connection),
+---       revert |vim.pack-lockfile| and |:restart| again.
 ---     - `vim.pack.update(nil, { target = 'lockfile' })`. Read and confirm.
 ---     - Manually delete outdated plugins (present locally, but were not present
 ---       in the lockfile prior to restart) with `vim.pack.del( { 'plugin' })`.
@@ -165,7 +168,7 @@
 ---- [PackChangedPre]() - before trying to change plugin's state.
 ---- [PackChanged]() - after plugin's state has changed.
 ---
----Each event populates the following |event-data| fields:
+---The |event-data| has these keys (type: `vim.event.packchanged.data`):
 ---- `active` - whether plugin was added via |vim.pack.add()| to current session.
 ---- `kind` - one of "install" (install on disk; before loading),
 ---  "update" (update already installed plugin; might be not loaded),
@@ -253,14 +256,19 @@ local function git_cmd(cmd, cwd)
   return (stdout:gsub('\n+$', ''))
 end
 
-local git_version = vim.version.parse('1')
+local function parse_semver(x)
+  return vim.version.parse(x, { strict = true })
+end
+
+--- @type vim.Version
+local git_version
 
 local function git_ensure_exec()
   local ok, sys = pcall(vim.system, { 'git', 'version' })
   if not ok then
     error('No `git` executable')
   end
-  git_version = vim.version.parse(sys:wait().stdout)
+  git_version = vim.version.parse(sys:wait().stdout) --[[@as vim.Version]]
 end
 
 --- @async
@@ -271,7 +279,7 @@ local function git_clone(url, path)
 
   if vim.startswith(url, 'file://') then
     cmd[#cmd + 1] = '--no-hardlinks'
-  elseif git_version >= vim.version.parse('2.27') then
+  elseif git_version >= parse_semver('2.27.0') then
     cmd[#cmd + 1] = '--filter=blob:none'
   end
 
@@ -340,7 +348,7 @@ end
 --- @param x string
 --- @return boolean
 local function is_semver(x)
-  return vim.version.parse(x) ~= nil
+  return parse_semver(x) ~= nil
 end
 
 local function is_nonempty_string(x)
@@ -483,7 +491,7 @@ end
 --- @param action string
 --- @return fun(kind: 'begin'|'report'|'end', percent: integer, fmt: string, ...:any): nil
 local function new_progress_report(action)
-  local progress = { kind = 'progress', title = 'vim.pack' }
+  local progress = { kind = 'progress', source = 'vim.pack', title = 'vim.pack' }
   local headless = #api.nvim_list_uis() == 0
 
   return vim.schedule_wrap(function(kind, percent, fmt, ...)
@@ -499,8 +507,16 @@ local function new_progress_report(action)
   end)
 end
 
-local n_threads = 2 * #(uv.cpu_info() or { {} })
 local copcall = package.loaded.jit and pcall or require('coxpcall').pcall
+
+local function async_join_run_wait(funs)
+  local n_threads = 2 * (uv.available_parallelism() or 1)
+  --- @async
+  local function joined_f()
+    async.join(n_threads, funs)
+  end
+  async.run(joined_f):wait()
+end
 
 --- Execute function in parallel for each non-errored plugin in the list
 --- @param plug_list vim.pack.Plug[]
@@ -536,13 +552,7 @@ local function run_list(plug_list, f, progress_action)
 
   -- Run async in parallel but wait for all to finish/timeout
   report_progress('begin', 0, '(0/%d)', #funs)
-
-  --- @async
-  local function joined_f()
-    async.join(n_threads, funs)
-  end
-  async.run(joined_f):wait()
-
+  async_join_run_wait(funs)
   report_progress('end', 100, '(%d/%d)', #funs, #funs)
 end
 
@@ -580,7 +590,7 @@ end
 local function get_last_semver_tag(tags, version_range)
   local last_tag, last_ver_tag --- @type string, vim.Version
   for _, tag in ipairs(tags) do
-    local ver_tag = vim.version.parse(tag)
+    local ver_tag = parse_semver(tag)
     if ver_tag then
       if version_range:has(ver_tag) and (not last_ver_tag or ver_tag > last_ver_tag) then
         last_tag, last_ver_tag = tag, ver_tag
@@ -661,18 +671,21 @@ local function checkout(p, timestamp, skip_stash)
   infer_revisions(p)
 
   if not skip_stash then
-    local stash_cmd = { 'stash', '--quiet' }
-    if git_version > vim.version.parse('2.13') then
+    local stash_cmd = { 'stash' }
+    if git_version > parse_semver('2.13.0') then
+      -- Use 'push' to avoid a 'stash -m' bug in versions prior to git v2.26
+      stash_cmd[#stash_cmd + 1] = 'push'
       stash_cmd[#stash_cmd + 1] = '--message'
       stash_cmd[#stash_cmd + 1] = ('vim.pack: %s Stash before checkout'):format(timestamp)
     end
+    stash_cmd[#stash_cmd + 1] = '--quiet'
     git_cmd(stash_cmd, p.path)
   end
 
   git_cmd({ 'checkout', '--quiet', p.info.sha_target }, p.path)
 
   local submodule_cmd = { 'submodule', 'update', '--init', '--recursive' }
-  if git_version >= vim.version.parse('2.36') then
+  if git_version >= parse_semver('2.36.0') then
     submodule_cmd[#submodule_cmd + 1] = '--filter=blob:none'
   end
   git_cmd(submodule_cmd, p.path)
@@ -752,7 +765,7 @@ local function infer_update_details(p)
   end
 
   local older_tags = ''
-  if git_version >= vim.version.parse('2.13') then
+  if git_version >= parse_semver('2.13.0') then
     older_tags = git_cmd({ 'tag', '--list', '--no-contains', sha_head }, p.path)
   end
   local cur_tags = git_cmd({ 'tag', '--list', '--points-at', sha_head }, p.path)
@@ -819,7 +832,7 @@ local function lock_write()
   local fd = assert(uv.fs_open(path, 'w', 438))
 
   local data = vim.json.encode(lock, { indent = '  ', sort_keys = true })
-  assert(uv.fs_write(fd, data))
+  assert(uv.fs_write(fd, data .. '\n'))
   assert(uv.fs_close(fd))
 end
 
@@ -913,6 +926,7 @@ local function lock_sync(confirm, specs)
     table.sort(to_install, function(a, b)
       return a.spec.name < b.spec.name
     end)
+    git_ensure_exec()
     install_list(to_install, confirm)
     lock_write()
   end
@@ -1151,7 +1165,7 @@ local function show_confirm_buf(lines, on_finish)
     delete_buffer()
   end
   -- - Use `nested` to allow other events (useful for statuslines)
-  api.nvim_create_autocmd('BufWriteCmd', { buffer = bufnr, nested = true, callback = finish })
+  api.nvim_create_autocmd('BufWriteCmd', { buf = bufnr, nested = true, callback = finish })
 
   -- Define action to cancel confirm
   --- @type integer
@@ -1407,11 +1421,7 @@ local function add_p_data_info(p_data_list)
       p_data.tags = git_get_tags(path)
     end
   end
-  --- @async
-  local function joined_f()
-    async.join(n_threads, funs)
-  end
-  async.run(joined_f):wait()
+  async_join_run_wait(funs)
 end
 
 --- Gets |vim.pack| plugin info, optionally filtered by `names`.
@@ -1468,6 +1478,7 @@ function M.get(names, opts)
   end
 
   if opts.info then
+    git_ensure_exec()
     add_p_data_info(res)
   end
 

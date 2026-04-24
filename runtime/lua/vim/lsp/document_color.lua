@@ -65,12 +65,13 @@ end
 --- Cache of the highlight groups that we've already created.
 --- @type table<string, true>
 local color_cache = {}
+local n_color_cache = 0
 
 --- Gets or creates the highlight group for the given LSP color information.
 ---
 --- @param hex_code string
 --- @param style string
---- @return string
+--- @return string?
 local function get_hl_group(hex_code, style)
   if style ~= 'background' then
     style = 'foreground'
@@ -78,17 +79,27 @@ local function get_hl_group(hex_code, style)
 
   local hl_name = ('LspDocumentColor_%s_%s'):format(hex_code:sub(2), style)
 
-  if not color_cache[hl_name] then
-    if style == 'background' then
-      api.nvim_set_hl(0, hl_name, { bg = hex_code, fg = get_contrast_color(hex_code) })
-    else
-      api.nvim_set_hl(0, hl_name, { fg = hex_code })
-    end
-
-    color_cache[hl_name] = true
+  if color_cache[hl_name] then
+    return hl_name
   end
 
-  return hl_name
+  -- Limit number of created highlight groups to 10000 to not approach near
+  -- a hard limit of 19999 highlight groups (`:h E849`)
+  if n_color_cache > 10000 then
+    vim.notify_once(
+      'E849: The maximum number of highlight groups has been reached.',
+      vim.log.levels.WARN
+    )
+    return nil
+  end
+
+  local hl_opts = style == 'background' and { bg = hex_code, fg = get_contrast_color(hex_code) }
+    or { fg = hex_code }
+  local ok = pcall(api.nvim_set_hl, 0, hl_name, hl_opts)
+  color_cache[hl_name] = ok
+  n_color_cache = n_color_cache + (ok and 1 or 0)
+
+  return ok and hl_name or nil
 end
 
 --- @class (private) vim.lsp.document_color.Provider : vim.lsp.Capability
@@ -138,6 +149,7 @@ function Provider:new(bufnr)
     desc = 'Refresh document_color',
     callback = function()
       color_cache = {}
+      n_color_cache = 0
       local provider = Provider.active[bufnr]
       if provider then
         provider:clear()
@@ -236,6 +248,7 @@ end
 function Provider:clear()
   for _, state in pairs(self.client_state) do
     state.hl_info = {}
+    state.processed_version = nil
     state.applied_version = nil
     api.nvim_buf_clear_namespace(self.bufnr, state.namespace, 0, -1)
   end
@@ -266,11 +279,11 @@ api.nvim_set_decoration_provider(document_color_ns, {
             api.nvim_buf_set_extmark(
               bufnr,
               state.namespace,
-              hl.range.start.row,
-              hl.range.start.col,
+              hl.range.start_row,
+              hl.range.start_col,
               {
-                end_row = hl.range.end_.row,
-                end_col = hl.range.end_.col,
+                end_row = hl.range.end_row,
+                end_col = hl.range.end_col,
                 hl_group = hl.hl_group,
                 strict = false,
               }
@@ -281,8 +294,8 @@ api.nvim_set_decoration_provider(document_color_ns, {
             api.nvim_buf_set_extmark(
               bufnr,
               state.namespace,
-              hl.range.start.row,
-              hl.range.start.col,
+              hl.range.start_row,
+              hl.range.start_col,
               {
                 virt_text = { { swatch, hl.hl_group } },
                 virt_text_pos = 'inline',
@@ -302,7 +315,8 @@ api.nvim_set_decoration_provider(document_color_ns, {
 local function get_hl_info_under_cursor(provider)
   local cursor_row, cursor_col = unpack(api.nvim_win_get_cursor(0)) --- @type integer, integer
   cursor_row = cursor_row - 1 -- Convert to 0-based index
-  local cursor_pos = vim.pos(cursor_row, cursor_col)
+  local buf = api.nvim_get_current_buf()
+  local cursor_pos = vim.pos(buf, cursor_row, cursor_col)
 
   for client_id, state in pairs(provider.client_state) do
     for _, hl in ipairs(state.hl_info) do

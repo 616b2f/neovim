@@ -1,5 +1,6 @@
 local util = require('vim.lsp.util')
 local log = require('vim.lsp.log')
+local tableclear = require('vim._core.table').clear
 local api = vim.api
 local M = {}
 
@@ -55,6 +56,7 @@ function Provider:new(bufnr)
     on_reload = function(_, buf)
       local provider = Provider.active[buf]
       if provider then
+        provider:clear()
         provider:automatic_request()
       end
     end,
@@ -94,6 +96,20 @@ function Provider:on_detach(client_id)
   end
 end
 
+---@package
+function Provider:clear()
+  self:reset_timer()
+  self.version = nil
+  tableclear(self.row_version)
+
+  for _, state in pairs(self.client_state) do
+    tableclear(state.row_lenses)
+    api.nvim_buf_clear_namespace(self.bufnr, state.namespace, 0, -1)
+  end
+
+  api.nvim__redraw({ buf = self.bufnr, valid = true, flush = false })
+end
+
 --- `lsp.Handler` for `textDocument/codeLens`.
 ---
 ---@package
@@ -115,8 +131,8 @@ function Provider:handler(err, result, ctx)
     return
   end
 
-  ---@type table<integer, lsp.CodeLens[]>
-  local row_lenses = {}
+  local row_lenses = state.row_lenses
+  tableclear(row_lenses)
 
   -- Code lenses should only span a single line.
   for _, lens in ipairs(result or {}) do
@@ -125,8 +141,6 @@ function Provider:handler(err, result, ctx)
     table.insert(lenses, lens)
     row_lenses[row] = lenses
   end
-
-  state.row_lenses = row_lenses
   self.version = ctx.version
 
   api.nvim__redraw({ buf = self.bufnr, valid = true, flush = false })
@@ -227,11 +241,10 @@ function Provider:on_win(toprow, botrow)
       for client_id, state in pairs(self.client_state) do
         local bufnr = self.bufnr
         local namespace = state.namespace
-
-        api.nvim_buf_clear_namespace(bufnr, namespace, row, row + 1)
-
         local lenses = state.row_lenses[row]
-        if lenses then
+        if not lenses then
+          api.nvim_buf_clear_namespace(bufnr, namespace, row, row + 1)
+        else
           table.sort(lenses, function(a, b)
             return a.range.start.character < b.range.start.character
           end)
@@ -240,12 +253,14 @@ function Provider:on_win(toprow, botrow)
           local range = vim.range.lsp(bufnr, lenses[1].range, client.offset_encoding)
           ---@type [string, string][]
           local virt_text = {
-            { string.rep(' ', range.start.col), 'LspCodeLensSeparator' },
+            { string.rep(' ', range.start_col), 'LspCodeLensSeparator' },
           }
+          local has_unresolved = false
 
           for _, lens in ipairs(lenses) do
             -- A code lens is unresolved when no command is associated to it.
             if not lens.command then
+              has_unresolved = true
               self:resolve(client, lens)
             else
               vim.list_extend(virt_text, {
@@ -254,25 +269,37 @@ function Provider:on_win(toprow, botrow)
               })
             end
           end
-          -- Remove trailing separator.
-          table.remove(virt_text)
 
-          -- Use a placeholder to prevent flickering caused by layout shifts.
-          if #virt_text == 1 then
-            table.insert(virt_text, { '', 'LspCodeLens' })
-          end
+          local had_extmark = #api.nvim_buf_get_extmarks(
+            bufnr,
+            namespace,
+            { row, 0 },
+            { row, -1 },
+            {}
+          ) > 0
 
-          api.nvim_buf_set_extmark(bufnr, namespace, row, 0, {
-            virt_lines = { virt_text },
-            virt_lines_above = true,
-            virt_lines_overflow = 'scroll',
-            hl_mode = 'combine',
-          })
+          if not has_unresolved or not had_extmark then
+            -- Remove trailing separator.
+            table.remove(virt_text)
 
-          -- Fix https://github.com/neovim/neovim/issues/16166
-          -- Make sure the code lens on the first line is visible when updating.
-          if row == 0 then
-            vim.cmd('normal! zb')
+            -- Use a placeholder to prevent flickering caused by layout shifts.
+            if #virt_text == 1 then
+              table.insert(virt_text, { '', 'LspCodeLens' })
+            end
+
+            api.nvim_buf_clear_namespace(bufnr, namespace, row, row + 1)
+            api.nvim_buf_set_extmark(bufnr, namespace, row, 0, {
+              virt_lines = { virt_text },
+              virt_lines_above = true,
+              virt_lines_overflow = 'scroll',
+              hl_mode = 'combine',
+            })
+
+            -- Fix https://github.com/neovim/neovim/issues/16166
+            -- Make sure the code lens on the first line is visible when updating.
+            if row == 0 then
+              vim.fn.winrestview({ topfill = 1 })
+            end
           end
         end
         self.row_version[row] = self.version
@@ -463,7 +490,7 @@ function M.run(opts)
 
   local winid = api.nvim_get_current_win()
   local bufnr = api.nvim_win_get_buf(winid)
-  local pos = vim.pos.cursor(api.nvim_win_get_cursor(winid))
+  local pos = vim.pos.cursor(bufnr, api.nvim_win_get_cursor(winid))
   local params = {
     textDocument = vim.lsp.util.make_text_document_params(bufnr),
   }
@@ -484,10 +511,15 @@ function M.on_refresh(err, _, ctx)
   for bufnr, provider in pairs(Provider.active) do
     for client_id in pairs(provider.client_state) do
       if client_id == ctx.client_id then
-        provider:request(client_id, function()
-          provider.row_version = {}
-          vim.api.nvim__redraw({ buf = bufnr, valid = true, flush = false })
-        end)
+        -- Do nothing if a request is already scheduled.
+        if not provider.timer then
+          provider:request(client_id, function()
+            if api.nvim_buf_is_valid(bufnr) then
+              tableclear(provider.row_version)
+              vim.api.nvim__redraw({ buf = bufnr, valid = true, flush = false })
+            end
+          end)
+        end
       end
     end
   end

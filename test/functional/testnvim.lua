@@ -1,6 +1,7 @@
 local uv = vim.uv
 local t = require('test.testutil')
-local busted = require('busted')
+---@type test.harness
+local harness = require('test.harness')
 
 local Session = require('test.client.session')
 local uv_stream = require('test.client.uv_stream')
@@ -8,6 +9,7 @@ local SocketStream = uv_stream.SocketStream
 local ProcStream = uv_stream.ProcStream
 
 local check_cores = t.check_cores
+local pcall_err = t.pcall_err
 local check_logs = t.check_logs
 local dedent = t.dedent
 local eq = t.eq
@@ -18,8 +20,7 @@ local sleep = uv.sleep
 --- Functions executing in the current nvim session/process being tested.
 local M = {}
 
-local lib_path = t.paths.test_build_dir .. (t.is_zig_build() and '/lib' or '/lib/nvim')
-M.runtime_set = 'set runtimepath^=' .. lib_path
+M.runtime_set = 'set runtimepath^=' .. t.paths.test_build_dir .. '/lib/nvim'
 
 M.nvim_prog = (os.getenv('NVIM_PRG') or t.paths.test_build_dir .. '/bin/nvim')
 -- Default settings for the test session.
@@ -528,7 +529,7 @@ function M.new_session(keep, ...)
   return new_session
 end
 
-busted.subscribe({ 'suite', 'end' }, function()
+harness.on_suite_end(function()
   M.check_close(true)
   local timed_out = false
   local timer = assert(vim.uv.new_timer())
@@ -837,17 +838,19 @@ function M.assert_visible(bufnr, visible)
   end
 end
 
-local start_dir = uv.cwd()
+local start_dir = assert(uv.cwd())
 
 function M.rmdir(path)
   local ret, _ = pcall(vim.fs.rm, path, { recursive = true, force = true })
+  local did_cd = false
   if not ret and is_os('win') then
     -- Maybe "Permission denied"; try again after changing the nvim
     -- process to the top-level directory.
     ret, _ = pcall(function()
-      M.command([[exe 'cd '.fnameescape(']] .. start_dir .. "')")
+      M.fn.chdir(start_dir)
       vim.fs.rm(path, { recursive = true, force = true })
     end)
+    did_cd = true
   end
   -- During teardown, the nvim process may not exit quickly enough, then rmdir()
   -- will fail (on Windows).
@@ -855,20 +858,10 @@ function M.rmdir(path)
     sleep(1000)
     vim.fs.rm(path, { recursive = true, force = true })
   end
-end
-
---- @deprecated Use `t.pcall_err()` to check failure, or `n.command()` to check success.
-function M.exc_exec(cmd)
-  M.command(([[
-    try
-      execute "%s"
-    catch
-      let g:__exception = v:exception
-    endtry
-  ]]):format(cmd:gsub('\n', '\\n'):gsub('[\\"]', '\\%0')))
-  local ret = M.eval('get(g:, "__exception", 0)')
-  M.command('unlet! g:__exception')
-  return ret
+  if did_cd then
+    -- Try to restore CWD in case rmdir() is used within a test. Needs pcall: #38278
+    pcall(M.command, 'cd -')
+  end
 end
 
 function M.exec(code)

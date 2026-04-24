@@ -132,8 +132,6 @@ static inline void normal_state_init(NormalState *s)
 // n_*(): functions called to handle Normal mode commands.
 // v_*(): functions called to handle Visual mode commands.
 
-static const char *e_noident = N_("E349: No identifier under cursor");
-
 /// Function to be called for a Normal or Visual mode command.
 /// The argument is a cmdarg_T.
 typedef void (*nv_func_T)(cmdarg_T *cap);
@@ -1910,7 +1908,8 @@ void clear_showcmd(void)
       // Make 'sbr' empty for a moment to get the correct size.
       p_sbr = empty_string_option;
       curwin->w_p_sbr = empty_string_option;
-      getvcols(curwin, &curwin->w_cursor, &VIsual, &leftcol, &rightcol);
+      getvcols(curwin, &curwin->w_cursor, &VIsual,
+               &leftcol, &rightcol, GETVCOL_END_EXCL_LBR);
       p_sbr = saved_sbr;
       curwin->w_p_sbr = saved_w_sbr;
       snprintf(showcmd_buf, SHOWCMD_BUFLEN, "%" PRId64 "x%" PRId64,
@@ -2770,7 +2769,7 @@ static void nv_zet(cmdarg_T *cap)
   int old_fdl = (int)curwin->w_p_fdl;
   int old_fen = curwin->w_p_fen;
 
-  int siso = get_sidescrolloff_value(curwin);
+  int64_t siso = get_sidescrolloff_value(curwin);
 
   if (ascii_isdigit(nchar) && !nv_z_get_count(cap, &nchar)) {
     return;
@@ -2888,10 +2887,10 @@ static void nv_zet(cmdarg_T *cap)
       if (hasFolding(curwin, curwin->w_cursor.lnum, NULL, NULL)) {
         col = 0;                        // like the cursor is in col 0
       } else {
-        getvcol(curwin, &curwin->w_cursor, &col, NULL, NULL);
+        getvcol(curwin, &curwin->w_cursor, &col, NULL, NULL, 0);
       }
       if (col > siso) {
-        col -= siso;
+        col -= (int)siso;
       } else {
         col = 0;
       }
@@ -2908,13 +2907,15 @@ static void nv_zet(cmdarg_T *cap)
       if (hasFolding(curwin, curwin->w_cursor.lnum, NULL, NULL)) {
         col = 0;                        // like the cursor is in col 0
       } else {
-        getvcol(curwin, &curwin->w_cursor, NULL, NULL, &col);
+        getvcol(curwin, &curwin->w_cursor, NULL, NULL, &col, 0);
       }
       int n = curwin->w_view_width - win_col_off(curwin);
       if (col + siso < n) {
         col = 0;
+      } else if (siso - n < INT_MAX - col) {
+        col = (int)(col + siso - n + 1);
       } else {
-        col = col + siso - n + 1;
+        col = INT_MAX;
       }
       if (curwin->w_leftcol != col) {
         curwin->w_leftcol = col;
@@ -3306,6 +3307,15 @@ static void nv_Zet(cmdarg_T *cap)
     do_cmdline_cmd("q!");
     break;
 
+  // "ZR": restart. With count, restart without checking for changes.
+  case 'R':
+    if (cap->count0 >= 1) {
+      do_cmdline_cmd("restart +qall!");
+    } else {
+      do_cmdline_cmd("restart");
+    }
+    break;
+
   default:
     clearopbeep(cap->oap);
   }
@@ -3339,10 +3349,11 @@ static size_t nv_K_getcmd(cmdarg_T *cap, char *kp, bool kp_help, bool kp_ex, cha
   if (kp_ex) {
     *buflen = 0;
     // 'keywordprg' is an ex command
+    *buflen = (size_t)snprintf(buf, bufsize, "%s ", kp);
     if (cap->count0 != 0) {  // Send the count to the ex command.
-      *buflen = (size_t)snprintf(buf, bufsize, "%" PRId64, (int64_t)(cap->count0));
+      *buflen += (size_t)snprintf(buf + *buflen, bufsize - *buflen,
+                                  "%" PRId64 " ", (int64_t)cap->count0);
     }
-    *buflen += (size_t)snprintf(buf + *buflen, bufsize - *buflen, "%s ", kp);
     return n;
   }
 
@@ -4093,7 +4104,7 @@ static void nv_csearch(cmdarg_T *cap)
       && (t_cmd || cap->oap->op_type != OP_NOP)) {
     colnr_T scol, ecol;
 
-    getvcol(curwin, &curwin->w_cursor, &scol, NULL, &ecol);
+    getvcol(curwin, &curwin->w_cursor, &scol, NULL, &ecol, 0);
     curwin->w_cursor.coladd = ecol - scol;
   } else {
     curwin->w_cursor.coladd = 0;
@@ -4646,7 +4657,7 @@ static void v_swap_corners(int cmdchar)
 
   if (cmdchar == 'O' && VIsual_mode == Ctrl_V) {
     pos_T old_cursor = curwin->w_cursor;
-    getvcols(curwin, &old_cursor, &VIsual, &left, &right);
+    getvcols(curwin, &old_cursor, &VIsual, &left, &right, 0);
     curwin->w_cursor.lnum = VIsual.lnum;
     coladvance(curwin, left);
     VIsual = curwin->w_cursor;
@@ -5363,7 +5374,7 @@ static void nv_g_dollar_cmd(cmdarg_T *cap)
     if (curwin->w_cursor.col > 0 && utf_ptr2cells(get_cursor_pos_ptr()) > 1) {
       colnr_T vcol;
 
-      getvvcol(curwin, &curwin->w_cursor, NULL, NULL, &vcol);
+      getvvcol(curwin, &curwin->w_cursor, NULL, NULL, &vcol, 0);
       if (vcol >= curwin->w_leftcol + curwin->w_view_width - col_off) {
         curwin->w_cursor.col--;
       }
@@ -6084,7 +6095,7 @@ bool unadjust_for_sel_inner(pos_T *pp)
     mark_mb_adjustpos(curbuf, pp);
     if (virtual_active(curwin)) {
       colnr_T cs, ce;
-      getvcol(curwin, pp, &cs, NULL, &ce);
+      getvcol(curwin, pp, &cs, NULL, &ce, 0);
       pp->coladd = ce - cs;
     }
   } else if (pp->lnum > 1) {

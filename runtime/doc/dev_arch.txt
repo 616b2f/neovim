@@ -51,17 +51,33 @@ LUA CODE
 Lua code lives in one of four places:
 
 1. Plugins! Not everything needs to live on `vim.*`. Plugins are the correct
-   model for non-essential features which the user may disable or replace with
-   a third-party plugin, and which do not have a formal API. Examples:
-   "editorconfig", "comment".
-   - "opt-out": `runtime/plugin/`
-   - "opt-in": `runtime/pack/dist/opt/`
-2. `runtime/lua/vim/` (the runtime): Lazy-loaded modules. Examples: `treesitter`, `lpeg`.
-3. `runtime/lua/vim/_core/shared.lua`: pure Lua functions which always are available.
-   Used in the test runner, and worker threads/processes launched from Nvim.
-4. `runtime/lua/vim/_core/`: Eager-loaded code which directly interacts with the Nvim
-   editor state. Only available in the main thread. See |dev-lua-builtin|
-   below.
+   model for non-essential functionality which (1) has "autoload" behavior,
+   (2) the user may disable or replace with a third-party plugin, (3) is
+   primarily user-facing, not an API.
+   - "Opt-out" plugins (activated on startup): `runtime/plugin/`
+   - "Opt-in" plugins (activated via `:packadd`): `runtime/pack/dist/opt/`
+   - Note: Update |standard-plugin-list|.
+   - Note: New plugins should place Lua modules in the shared "nvim"
+     namespace: `require('nvim.foo')`, not `require('foo')`.
+   - Examples:
+     - ✅ spellfile `runtime/lua/nvim/spellfile.lua`
+     - ✅ tutor
+   - Don't use these legacy plugins as examples (their modules should live
+     in `lua/nvim/x.lua`, not `lua/x.lua`):
+     - ❌ editorconfig.lua
+     - ❌ man.lua
+     - ❌ nvim.difftool
+     - ❌ nvim.tohtml
+     - ❌ nvim.undotree
+2. Stdlib: `runtime/lua/vim/`. Modules on `vim.*`, lazy-loaded (as opposed to
+   "Core" modules, see below).
+   - Examples: `vim.treesitter`, `vim.lpeg`.
+3. Core: `runtime/lua/vim/_core/`. Internal-only, compiled-in modules. May
+   directly interact with Nvim internals. Only available in main thread. See
+   |dev-lua-builtin| below.
+4. "Shared" core: `runtime/lua/vim/_core/shared.lua`. Pure Lua functions which
+   always are available. Used in the test runner, and worker threads/processes
+   launched from Nvim.
 
 The top-level `vim.` namespace is for fundamental Lua and editor features. Use
 submodules (`vim.foo`) for everything else (but avoid excessive "nesting"), or
@@ -96,6 +112,12 @@ Many of the editor concepts are defined as Lua data files:
 - Ex (cmdline) commands: src/nvim/ex_cmds.lua
 - Options: src/nvim/options.lua
 - Vimscript functions: src/nvim/eval.lua
+  - Functions can be implemented in C (`f_foo` in eval/funcs.c), or in Lua
+    (set `func_lua` in eval.lua, implement in _core/vimfn.lua). Lua impl is
+    preferred, for performance and maintainability.
+    - VimScript callers go through `lua_wrapper` (typval <=> Object conversion).
+    - Lua callers (`vim.fn.foo()`) take a fast path in `nlua_call()` that calls
+      the Lua function directly, avoiding any conversion.
 - v: variables: src/nvim/vvars.lua
 
 ==============================================================================
@@ -109,8 +131,7 @@ internal |event-loop|.)
 
 Where possible, new editor events should be implemented using `aucmd_defer()`
 (and where possible, old events migrate to this), so they are processed in
-a predictable manner, which avoids crashes and race conditions. See
-`do_markset_autocmd` for an example.
+a predictable manner, which avoids crashes. See |dev-new-event|.
 
 ==============================================================================
 UI events                                                      *dev-ui-events*
@@ -170,6 +191,44 @@ be "fast". For example, commit 3940c435e405 fixed such a bug with
 Common examples of non-fast code: regexp matching, wildcard expansion,
 expression evaluation.
 
+==============================================================================
+Internal practices and patterns                          *dev-internals-howto*
+
+------------------------------------------------------------------------------
+Add a new excmd or vimfn ("f_xx")  function    *dev-new-excmd* *dev-new-vimfn*
+
+To implement an Ex cmd or f_xx function, choose from one of three ways (in
+order of preference):
+
+1. Full Lua: the implementation lives in entirely in Lua. This has
+   a performance benefit: the Vimscript <=> Lua bridge is skipped when the
+   `vim.fn.xx()` function is called from Lua. Examples:
+    - `f_hostname`
+2. Partial Lua: the C implementation calls `nlua_call_vimfn` or
+   `nlua_call_excmd`. (Or in rare cases: `nlua_exec` / `NLUA_EXEC_STATIC`).
+   Examples:
+   - `ex_log`
+   - `ex_lsp`
+   - `f_serverlist`
+3. Legacy way: implement the function entirely in C.
+   Examples:
+   - `f_chansend`
+   - `f_flatten`
+   - `f_searchpos`
+
+------------------------------------------------------------------------------
+Add a new event (autocmd)                                      *dev-new-event*
+
+To add a new editor event (autocmd):
+
+1. Register the event name in `src/nvim/auevents.lua`. If the event is
+   Nvim-only (not in Vim), also update the `nvim_specific` table.
+2. Fire the event, by one of these approaches:
+   - From C, use `aucmd_defer()` to fire deferred (safe, predictable). See
+     `do_markset_autocmd` for example.
+   - From Lua, use `vim.api.nvim_exec_autocmds()`.
+3. Define the |event-data| type (if any) in `runtime/lua/vim/_meta/events.lua`.
+4. Document the event in `runtime/doc/autocmd.txt`.
 
 ==============================================================================
 The event-loop                                                    *event-loop*

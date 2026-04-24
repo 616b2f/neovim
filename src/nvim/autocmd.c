@@ -573,7 +573,7 @@ void do_augroup(char *arg, bool del_group)
   }
 }
 
-#if defined(EXITFREE)
+#ifdef EXITFREE
 void free_all_autocmds(void)
 {
   FOR_ALL_AUEVENTS(event) {
@@ -1807,6 +1807,7 @@ bool apply_autocmds_group(event_T event, char *fname, char *fname_io, bool force
         || event == EVENT_MENUPOPUP
         || event == EVENT_MODECHANGED
         || event == EVENT_OPTIONSET
+        || event == EVENT_PROGRESS
         || event == EVENT_QUICKFIXCMDPOST
         || event == EVENT_QUICKFIXCMDPRE
         || event == EVENT_REMOTEREPLY
@@ -2691,11 +2692,6 @@ void do_autocmd_uienter(uint64_t chanid, bool attached)
 {
   static bool recursive = false;
 
-#ifdef EXITFREE
-  if (entered_free_all_mem) {
-    return;
-  }
-#endif
   if (starting == NO_SCREEN) {
     return;  // user config hasn't been sourced yet
   }

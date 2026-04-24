@@ -47,7 +47,6 @@
 
 local t = require('test.testutil')
 local n = require('test.functional.testnvim')()
-local busted = require('busted')
 local uv = vim.uv
 
 local deepcopy = vim.deepcopy
@@ -911,7 +910,7 @@ between asynchronous (feed(), nvim_input()) and synchronous API calls.
     if eof then
       err = err .. '\n\n' .. eof[2]
     end
-    busted.fail(err .. '\n\nSnapshot:\n' .. self:_print_snapshot(), 3)
+    error(err .. '\n\nSnapshot:\n' .. self:_print_snapshot(), 3)
   elseif did_warn then
     if eof then
       print(eof[2])
@@ -922,9 +921,9 @@ between asynchronous (feed(), nvim_input()) and synchronous API calls.
   end
 
   if flags.intermediate and not intermediate_seen then
-    busted.fail('Expected intermediate screen state before final screen state', 3)
+    error('Expected intermediate screen state before final screen state', 3)
   elseif flags.unchanged and intermediate_seen then
-    busted.fail(
+    error(
       'Expected screen state to be unchanged.\nIntermediate screen state:\n'
         .. intermediate_state_snapshot,
       3
@@ -1453,6 +1452,12 @@ function Screen:_handle_msg_show(kind, chunks, replace_last, history, append, id
   local pos = #self.messages
   if not replace_last or pos == 0 then
     pos = pos + 1
+  end
+  for i, msg in pairs(self.messages) do
+    if id ~= -1 and msg.id == id then
+      pos = i
+      break
+    end
   end
   self.messages[pos] = {
     kind = kind,

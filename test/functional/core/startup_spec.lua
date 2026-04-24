@@ -181,7 +181,7 @@ describe('startup', function()
 
     it('Lua-error sets Nvim exitcode', function()
       local proc = n.spawn_wait('-l', 'test/functional/fixtures/startup-fail.lua')
-      matches('E5113: .* my pearls!!', proc:output())
+      matches('E5113: .* my pearls!!', (proc:output()))
       eq(0, proc.signal)
       eq(1, proc.status)
 
@@ -1476,11 +1476,11 @@ describe('user config init', function()
 
       -- trust .exrc
       feed(':trust<CR>')
-      screen:expect({ any = 'Allowed in trust database: ".*' .. pathsep .. '%.exrc"' })
+      screen:expect({ any = 'Allowed in trust database: ".*/%.exrc"' })
       feed(':q<CR>')
       -- trust .nvim.lua
       feed(':trust<CR>')
-      screen:expect({ any = 'Allowed in trust database: ".*' .. pathsep .. '%.nvim%.lua"' })
+      screen:expect({ any = 'Allowed in trust database: ".*/%.nvim%.lua"' })
       feed(':q<CR>')
       -- no exrc file is executed
       feed(':echo g:exrc_count<CR>')
@@ -1498,7 +1498,17 @@ describe('user config init', function()
 
       -- a total of 2 exrc files are executed
       feed(':echo g:exrc_count<CR>')
-      screen:expect({ any = '2' })
+      screen:expect([[
+        ^{MATCH: +}|
+        ~{MATCH: +}|*4
+        [No Name]{MATCH: +}0,0-1{MATCH: +}All|
+        2{MATCH: +}|
+        -- TERMINAL --{MATCH: +}|
+      ]])
+
+      -- The server is now detached and needs to be quit explicitly.
+      feed(':qall!<CR>')
+      screen:expect({ any = vim.pesc('[Process exited 0]') })
     end)
   end)
 

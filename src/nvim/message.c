@@ -14,6 +14,7 @@
 #include "klib/kvec.h"
 #include "nvim/api/private/defs.h"
 #include "nvim/api/private/helpers.h"
+#include "nvim/api/vim.h"
 #include "nvim/ascii_defs.h"
 #include "nvim/autocmd.h"
 #include "nvim/buffer_defs.h"
@@ -118,7 +119,7 @@ static int progress_msg_target = PROGRESS_TARGET_CMD;
 static FILE *verbose_fd = NULL;
 static bool verbose_did_open = false;
 
-bool keep_msg_more = false;    // keep_msg was set by msgmore()
+static bool keep_msg_more = false;    // keep_msg was set by msgmore()
 
 // When writing messages to the screen, there are many different situations.
 // A number of variables is used to remember the current state:
@@ -283,7 +284,7 @@ void msg_multiline(String str, int hl_id, bool check_int, bool hist, bool *need_
     if (check_int && got_int) {
       return;
     }
-    if (*s == '\n' || *s == TAB || *s == '\r') {
+    if (*s == '\n' || *s == TAB || *s == '\r' || *s == BELL) {
       // Print all chars before the delimiter
       msg_outtrans_len(chunk, (int)(s - chunk), hl_id, hist);
 
@@ -291,7 +292,11 @@ void msg_multiline(String str, int hl_id, bool check_int, bool hist, bool *need_
         msg_clr_eos();
         *need_clear = false;
       }
-      msg_putchar_hl((uint8_t)(*s), hl_id);
+      if (*s == BELL) {
+        vim_beep(kOptBoFlagShell);
+      } else {
+        msg_putchar_hl((uint8_t)(*s), hl_id);
+      }
       chunk = s + 1;
     }
     s++;
@@ -383,7 +388,6 @@ MsgID msg_multihl(MsgID id, HlMessage hl_msg, const char *kind, bool history, bo
   msg_clr_eos();
   bool need_clear = false;
   bool hl_msg_updated = false;
-  msg_ext_history = history;
   if (kind != NULL) {
     msg_ext_set_kind(kind);
   }
@@ -1095,6 +1099,31 @@ char *msg_may_trunc(bool force, char *s)
   return s;
 }
 
+char *msg_progress(char *s, char *id, char *status, int hl_id, bool hist, bool trunc)
+{
+  Error err = ERROR_INIT;
+  Dict(echo_opts) opts = {
+    .kind = cstr_as_string("progress"),
+    .source = cstr_as_string("nvim"),
+    .status = cstr_as_string(status),
+    .id = CSTR_AS_OBJ(id),
+  };
+  if (hist && (!trunc || ui_has(kUIMessages))) {
+    msg_hist_add(s, -1, 0);
+  }
+  if (trunc) {
+    s = msg_may_trunc(false, s);
+  }
+  MAXSIZE_TEMP_ARRAY(chunk, 2);
+  MAXSIZE_TEMP_ARRAY(chunks, 1);
+  ADD_C(chunk, CSTR_AS_OBJ(s));
+  ADD_C(chunk, INTEGER_OBJ(hl_id));
+  ADD_C(chunks, ARRAY_OBJ(chunk));
+  nvim_echo(chunks, false, &opts, &err);
+  ui_flush();
+  return s;
+}
+
 void hl_msg_free(HlMessage hl_msg)
 {
   for (size_t i = 0; i < kv_size(hl_msg); i++) {
@@ -1145,12 +1174,15 @@ void do_autocmd_progress(MsgID msg_id, HlMessage msg, MessageData *msg_data)
   PUT_C(data, "text", ARRAY_OBJ(messages));
   if (msg_data != NULL) {
     PUT_C(data, "percent", INTEGER_OBJ(msg_data->percent));
+    PUT_C(data, "source", STRING_OBJ(msg_data->source));
     PUT_C(data, "status", STRING_OBJ(msg_data->status));
     PUT_C(data, "title", STRING_OBJ(msg_data->title));
     PUT_C(data, "data", DICT_OBJ(msg_data->data));
   }
 
-  apply_autocmds_group(EVENT_PROGRESS, msg_data ? msg_data->title.data : "", NULL, true,
+  apply_autocmds_group(EVENT_PROGRESS,
+                       (msg_data && msg_data->source.size > 0) ? msg_data->source.data : "", NULL,
+                       true,
                        AUGROUP_ALL, NULL, NULL, &DICT_OBJ(data));
   kv_destroy(messages);
 }
@@ -1721,7 +1753,11 @@ void msg_start(void)
     msg_row = cmdline_row;
     msg_col = 0;
   } else if ((msg_didout || p_ch == 0) && !ui_has(kUIMessages)) {  // start message on next line
-    msg_putchar('\n');
+    if (p_ch == 0 && !msg_didout && msg_use_printf()) {
+      msg_puts_display("\n", 1, 0, false);
+    } else {
+      msg_putchar('\n');
+    }
     did_return = true;
     cmdline_row = msg_row;
   }
@@ -2329,8 +2365,10 @@ void msg_puts_len(const char *const str, const ptrdiff_t len, int hl_id, bool hi
   // Don't print anything when using ":silent cmd" or empty message.
   if (msg_silent != 0 || *str == NUL) {
     if (*str == NUL && ui_has(kUIMessages)) {
+      msg_ext_ui_flush();  // ensure messages until now are emitted
       ui_call_msg_show(cstr_as_string("empty"), (Array)ARRAY_DICT_INIT, false, false, false,
                        INTEGER_OBJ(-1), (String)STRING_INIT);
+      cmdline_was_last_drawn = false;
     }
     return;
   }
@@ -3304,6 +3342,7 @@ void msg_clr_eos_force(void)
   if (msg_row < Rows - 1 || msg_col == 0) {
     clear_cmdline = false;  // command line has been cleared
     mode_displayed = false;  // mode cleared or overwritten
+    cmdline_was_last_drawn = false;
   }
 }
 

@@ -4,6 +4,7 @@ local n = require('test.functional.testnvim')()
 local clear = n.clear
 local command = n.command
 local eq = t.eq
+local pcall_err = t.pcall_err
 local fn = n.fn
 local api = n.api
 local mkdir = t.mkdir
@@ -156,6 +157,10 @@ describe(':help', function()
     -- n.command [[set keywordprg=:help]]
 
     -- Failure modes:
+    set_lines ''
+    cursor(0, { 1, 1 })
+    t.matches('E349: No identifier under cursor', t.pcall_err(n.exec, [[:help!]]))
+
     set_lines 'xxxxxxxxx'
     cursor(0, { 1, 4 })
     t.matches('E149: No help for xxxxxxxxx', t.pcall_err(n.exec, [[:help!]]))

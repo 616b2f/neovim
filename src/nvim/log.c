@@ -58,9 +58,9 @@ static bool log_try_create(char *fname)
 
 /// Initializes the log file path and sets $NVIM_LOG_FILE if empty.
 ///
-/// Tries $NVIM_LOG_FILE, or falls back to $XDG_STATE_HOME/nvim/nvim.log. Failed
-/// initialization indicates either a bug in expand_env() or both $NVIM_LOG_FILE
-/// and $HOME environment variables are undefined.
+/// Tries $NVIM_LOG_FILE, or falls back to $XDG_STATE_HOME/nvim/logs/nvim.log.
+/// Failed initialization indicates either a bug in expand_env() or both
+/// $NVIM_LOG_FILE and $HOME environment variables are undefined.
 static void log_path_init(void)
 {
   size_t size = sizeof(log_file_path);
@@ -75,8 +75,8 @@ static void log_path_init(void)
       // Used by _core/log.lua:check_log_file to validate logfile on startup.
       os_setenv("__NVIM_LOG_FILE_WANT", log_file_path, true);
     }
-    // Make $XDG_STATE_HOME if it does not exist.
-    char *loghome = get_xdg_home(kXDGStateHome);
+    // Make $XDG_STATE_HOME/logs if it does not exist.
+    char *loghome = concat_fnames_realloc(get_xdg_home(kXDGStateHome), "logs", true);
     char *failed_dir = NULL;
     int log_dir_failure = 0;
     if (!os_isdir(loghome)) {
@@ -84,7 +84,7 @@ static void log_path_init(void)
     }
     XFREE_CLEAR(loghome);
     // Invalid $NVIM_LOG_FILE or failed to expand; fall back to default.
-    char *defaultpath = stdpaths_user_state_subpath("nvim.log", 0, true);
+    char *defaultpath = stdpaths_user_state_subpath("logs/nvim.log", 0, true);
     size_t len = xstrlcpy(log_file_path, defaultpath, size);
     xfree(defaultpath);
     // Fall back to $CWD/nvim.log
@@ -149,13 +149,9 @@ bool logmsg(int log_level, const char *context, const char *func_name, int line_
     return false;
   }
 
-#ifndef NVIM_LOG_DEBUG
-  // This should rarely happen (callsites are compiled out), but to be sure.
-  // TODO(bfredl): allow log levels to be configured at runtime
-  if (log_level < LOGLVL_WRN) {
+  if (log_level < g_min_log_level) {
     return false;
   }
-#endif
 
 #ifdef EXITFREE
   // Logging after we've already started freeing all our memory will only cause

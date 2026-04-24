@@ -609,23 +609,30 @@ empty `queries/c/injections.scm` file in your 'runtimepath'.
 ==============================================================================
 DEFAULTS                                                 *treesitter-defaults*
 
-							*v_an*
-an			Selects [count]th parent node.
+                                            *treesitter-incremental-selection*
+                                                                        *v_an*
+an                      Selects [count]th parent node.
 
-			If buffer has no treesitter parser,
-			falls back to |vim.lsp.buf.selection_range()|.
+                        If buffer has no treesitter parser,
+                        falls back to |vim.lsp.buf.selection_range()|.
 
-							*v_in*
-in			Selects [count]th previous (or first) child node.
+                                                                        *v_in*
+in                      Selects [count]th previous (or first) child node.
 
-			If buffer has no treesitter parser,
-			falls back to |vim.lsp.buf.selection_range()|.
+                        If buffer has no treesitter parser,
+                        falls back to |vim.lsp.buf.selection_range()|.
 
-							*v_]n*
-]n			Selects [count]th next node.
+                                                                        *v_]n*
+]n                      Selects [count]th next node.
 
-							*v_[n*
-[n			Selects [count]th previous node.
+                                                                        *v_[n*
+[n                      Selects [count]th previous node.
+
+                                                                        *v_]N*
+]N                      Expands selection to [count]th next node.
+
+                                                                        *v_[N*
+[N                      Expands selection to [count]th previous node.
 
 ==============================================================================
 VIM.TREESITTER                                                *lua-treesitter*
@@ -1571,10 +1578,6 @@ add_directive({name}, {handler}, {opts})
       • {opts}     (`table`) A table with the following fields:
                    • {force}? (`boolean`) Override an existing predicate of
                      the same name
-                   • {all}? (`boolean`) Use the correct implementation of the
-                     match table where capture IDs map to a list of nodes
-                     instead of a single node. Defaults to true. This option
-                     will be removed in a future release.
 
                                         *vim.treesitter.query.add_predicate()*
 add_predicate({name}, {handler}, {opts})
@@ -1588,10 +1591,6 @@ add_predicate({name}, {handler}, {opts})
       • {opts}     (`table?`) A table with the following fields:
                    • {force}? (`boolean`) Override an existing predicate of
                      the same name
-                   • {all}? (`boolean`) Use the correct implementation of the
-                     match table where capture IDs map to a list of nodes
-                     instead of a single node. Defaults to true. This option
-                     will be removed in a future release.
 
 edit({lang})                                     *vim.treesitter.query.edit()*
     Opens a live editor to query the buffer you started from.
@@ -1808,11 +1807,6 @@ Query:iter_matches({node}, {source}, {start}, {stop}, {opts})
                     traversing too deep into a tree.
                   • match_limit (integer) Set the maximum number of
                     in-progress matches (Default: 256).
-                  • all (boolean) When `false` (default `true`), the returned
-                    table maps capture IDs to a single (last) node instead of
-                    the full list of matching nodes. This option is only for
-                    backward compatibility and will be removed in a future
-                    release.
 
     Return: ~
         (`fun(): integer, table<integer, TSNode[]>, vim.treesitter.query.TSMetadata, TSTree`)
@@ -1830,8 +1824,8 @@ set({lang}, {query_name}, {text})                 *vim.treesitter.query.set()*
           'c',
           'highlights',
           [[;inherits c
-          (identifier) @spell]])
-        ]])
+          (identifier) @spell]]
+        )
 <
 
     Parameters: ~

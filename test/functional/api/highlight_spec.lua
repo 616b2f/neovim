@@ -252,10 +252,123 @@ describe('API: set highlight', function()
 
   it('does not segfault on invalid group name #20009', function()
     eq(
-      "Invalid highlight name: 'foo bar'",
+      'Vim:E5248: Invalid character in group name',
       pcall_err(api.nvim_set_hl, 0, 'foo bar', { bold = true })
     )
     assert_alive()
+  end)
+
+  it('can be silenced if there are too many groups #38930', function()
+    local n_groups = vim.tbl_count(api.nvim_get_hl(0, {}))
+    local has_fail = false
+    for i = n_groups + 1, 20000 do
+      local _, msg = pcall(api.nvim_set_hl, 0, 'New_' .. i, { fg = '#000000' })
+      local is_fail = type(msg) == 'string'
+        and msg:find('Too many highlight and syntax groups$') ~= nil
+      has_fail = has_fail or is_fail
+    end
+    eq('', exec_capture('messages'))
+    eq(true, has_fail)
+  end)
+
+  it('update=true sets only specified keys', function()
+    api.nvim_set_hl(0, 'TestGroup', { fg = '#ff0000', bg = '#0000ff', bold = true })
+    api.nvim_set_hl(0, 'TestGroup', { bg = '#00ff00', update = true })
+    local hl = api.nvim_get_hl(0, { name = 'TestGroup' })
+    eq(tonumber('0xff0000'), hl.fg)
+    eq(tonumber('0x00ff00'), hl.bg)
+    eq(true, hl.bold)
+
+    api.nvim_set_hl(0, 'TestGroup', { bold = false, update = true })
+    hl = api.nvim_get_hl(0, { name = 'TestGroup' })
+    eq(nil, hl.bold)
+    eq(tonumber('0xff0000'), hl.fg)
+
+    api.nvim_set_hl(0, 'TestGroup', { italic = true })
+
+    hl = api.nvim_get_hl(0, { name = 'TestGroup' })
+    eq(nil, hl.fg)
+    eq(nil, hl.bg)
+    eq(true, hl.italic)
+
+    local ns = api.nvim_create_namespace('test')
+    api.nvim_set_hl(ns, 'TestGroup', { fg = '#ff0000', italic = true })
+    api.nvim_set_hl(ns, 'TestGroup', { fg = '#00ff00', update = true })
+    hl = api.nvim_get_hl(ns, { name = 'TestGroup' })
+    eq(tonumber('0x00ff00'), hl.fg)
+    eq(true, hl.italic)
+
+    api.nvim_set_hl(0, 'NamedColor', { fg = 'red', bg = 'blue' })
+    api.nvim_set_hl(0, 'LinkedGroup', { link = 'NamedColor' })
+    api.nvim_set_hl(0, 'LinkedGroup', { bold = true, fg = 'green', update = true })
+    hl = api.nvim_get_hl(0, { name = 'LinkedGroup' })
+    eq(nil, hl.link)
+    eq(true, hl.bold)
+    eq(
+      'LinkedGroup    xxx cterm=bold gui=bold guifg=Green guibg=Blue',
+      n.exec_capture('hi LinkedGroup')
+    )
+    api.nvim_set_hl(0, 'LinkedGroup', { bg = '#121314', update = true })
+    eq(
+      'LinkedGroup    xxx cterm=bold gui=bold guifg=Green guibg=#121314',
+      n.exec_capture('hi LinkedGroup')
+    )
+
+    -- underline style flags: false must not corrupt other styles
+    local unders = { 'underline', 'undercurl', 'underdouble', 'underdotted', 'underdashed' }
+    for _, a in ipairs(unders) do
+      for _, b in ipairs(unders) do
+        if a ~= b then
+          api.nvim_set_hl(0, 'TestGroup', { [a] = true, [b] = false })
+          hl = api.nvim_get_hl(0, { name = 'TestGroup' })
+          eq(true, hl[a])
+          eq(nil, hl[b])
+        end
+      end
+    end
+    api.nvim_set_hl(0, 'TestGroup', { underdouble = true, fg = '#ff0000', bold = true })
+    api.nvim_set_hl(0, 'TestGroup', { fg = '#00ff00', update = true })
+    hl = api.nvim_get_hl(0, { name = 'TestGroup' })
+    eq(true, hl.underdouble)
+    eq(true, hl.bold)
+    eq(65280, hl.fg)
+
+    api.nvim_set_hl(0, 'TestGroup', { underdashed = true, update = true })
+    hl = api.nvim_get_hl(0, { name = 'TestGroup' })
+    eq(true, hl.underdashed)
+    eq(nil, hl.underdouble)
+
+    api.nvim_set_hl(0, 'TestGroup', { underdouble = true, bold = true })
+    api.nvim_set_hl(0, 'TestGroup', { underdashed = false, update = true })
+    hl = api.nvim_get_hl(0, { name = 'TestGroup' })
+    eq(true, hl.underdouble)
+    api.nvim_set_hl(0, 'TestGroup', { underdouble = false, update = true })
+    hl = api.nvim_get_hl(0, { name = 'TestGroup' })
+    eq(nil, hl.underdouble)
+    eq(true, hl.bold)
+  end)
+
+  it('can set font', function()
+    local ns = api.nvim_create_namespace('test_font')
+    api.nvim_set_hl(ns, 'TestFont', { fg = '#ff0000', font = 'Courier New 10' })
+    local hl = api.nvim_get_hl(ns, { name = 'TestFont' })
+    eq('Courier New 10', hl.font)
+    eq(16711680, hl.fg)
+
+    api.nvim_set_hl(ns, 'TestFont', { font = 'Monaco' })
+    hl = api.nvim_get_hl(ns, { name = 'TestFont' })
+    eq('Monaco', hl.font)
+
+    -- Clear font with "NONE"
+    api.nvim_set_hl(ns, 'TestFont', { font = 'NONE' })
+    hl = api.nvim_get_hl(ns, { name = 'TestFont' })
+    eq(nil, hl.font)
+
+    -- global namespace
+    api.nvim_set_hl(0, 'TestFontGlobal', { bg = '#00ff00', font = 'JetBrains Mono' })
+    hl = api.nvim_get_hl(0, { name = 'TestFontGlobal' })
+    eq('JetBrains Mono', hl.font)
+    eq(65280, hl.bg)
   end)
 end)
 
@@ -533,6 +646,22 @@ describe('API: get highlight', function()
     eq(hl, api.nvim_get_hl(0, { name = 'Foo', link = true }))
   end)
 
+  it('link_global resolves in global namespace', function()
+    local ns = api.nvim_create_namespace('hl_test')
+    api.nvim_set_hl(0, 'GlTarget', { fg = '#ff0000' })
+    api.nvim_set_hl(ns, 'GlSource', { link_global = fn.hlID('GlTarget') })
+    eq({ link = 'GlTarget' }, api.nvim_get_hl(ns, { name = 'GlSource' }))
+
+    -- when both link and link_global are given, link_global wins
+    api.nvim_set_hl(0, 'OtherTarget', { fg = '#00ff00' })
+    api.nvim_set_hl(
+      ns,
+      'GlSource',
+      { link = fn.hlID('OtherTarget'), link_global = fn.hlID('GlTarget') }
+    )
+    eq({ link = 'GlTarget' }, api.nvim_get_hl(ns, { name = 'GlSource' }))
+  end)
+
   it("doesn't contain unset groups", function()
     local id = api.nvim_get_hl_id_by_name '@foobar.hubbabubba'
     ok(id > 0)
@@ -585,6 +714,29 @@ describe('API: get highlight', function()
     api.nvim_set_hl(0, 'Bar', { link = 'Comment', default = true })
     api.nvim_set_hl(0, 'Bar', { link = 'Foo', default = true, force = true })
     eq({ link = 'Foo', default = true }, api.nvim_get_hl(0, { name = 'Bar' }))
+  end)
+
+  it('round-trips fg_indexed/bg_indexed through nvim_get_hl', function()
+    api.nvim_set_hl(0, 'Test_idx', {
+      fg = '#cc0000',
+      bg = '#0000cc',
+      ctermfg = 1,
+      ctermbg = 4,
+      fg_indexed = true,
+      bg_indexed = true,
+    })
+    local hl = api.nvim_get_hl(0, { name = 'Test_idx' })
+    eq(true, hl.fg_indexed)
+    eq(true, hl.bg_indexed)
+    eq(tonumber('0xcc0000'), hl.fg)
+    eq(tonumber('0x0000cc'), hl.bg)
+    eq(1, hl.ctermfg)
+    eq(4, hl.ctermbg)
+
+    api.nvim_set_hl(0, 'Test_idx', { fg_indexed = false, update = true })
+    eq(nil, api.nvim_get_hl(0, { name = 'Test_idx' }).fg_indexed)
+    eq(true, api.nvim_get_hl(0, { name = 'Test_idx' }).bg_indexed)
+    eq(tonumber('0xcc0000'), api.nvim_get_hl(0, { name = 'Test_idx' }).fg)
   end)
 end)
 

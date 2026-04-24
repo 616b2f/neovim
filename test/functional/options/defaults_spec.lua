@@ -10,10 +10,10 @@ local Screen = require('test.functional.ui.screen')
 
 local assert_alive = n.assert_alive
 local assert_log = t.assert_log
+local pcall_err = t.pcall_err
 local api = n.api
 local command = n.command
 local clear = n.clear
-local exc_exec = n.exc_exec
 local eval = n.eval
 local eq = t.eq
 local ok = t.ok
@@ -260,7 +260,7 @@ describe('startup defaults', function()
           NVIM_LOG_FILE = '', -- Empty is invalid.
         },
       })
-      eq(xdgstatedir .. '/nvim.log', t.fix_slashes(eval('$NVIM_LOG_FILE')))
+      eq(xdgstatedir .. '/logs/nvim.log', t.fix_slashes(eval('$NVIM_LOG_FILE')))
     end)
 
     it('defaults to stdpath("log")/nvim.log if invalid', function()
@@ -271,7 +271,7 @@ describe('startup defaults', function()
           NVIM_LOG_FILE = '.', -- Any directory is invalid.
         },
       })
-      eq(xdgstatedir .. '/nvim.log', t.fix_slashes(eval('$NVIM_LOG_FILE')))
+      eq(xdgstatedir .. '/logs/nvim.log', t.fix_slashes(eval('$NVIM_LOG_FILE')))
       -- Avoid "failed to open $NVIM_LOG_FILE" noise in test output.
       expect_exit(command, 'qall!')
     end)
@@ -916,11 +916,17 @@ describe('stdpath()', function()
 
   it('failure modes', function()
     clear()
-    eq('Vim(call):E6100: "capybara" is not a valid stdpath', exc_exec('call stdpath("capybara")'))
-    eq('Vim(call):E6100: "" is not a valid stdpath', exc_exec('call stdpath("")'))
-    eq('Vim(call):E6100: "23" is not a valid stdpath', exc_exec('call stdpath(23)'))
-    eq('Vim(call):E731: Using a Dictionary as a String', exc_exec('call stdpath({"eris": 23})'))
-    eq('Vim(call):E730: Using a List as a String', exc_exec('call stdpath([23])'))
+    eq(
+      'Vim(call):E6100: "capybara" is not a valid stdpath',
+      pcall_err(command, 'call stdpath("capybara")')
+    )
+    eq('Vim(call):E6100: "" is not a valid stdpath', pcall_err(command, 'call stdpath("")'))
+    eq('Vim(call):E6100: "23" is not a valid stdpath', pcall_err(command, 'call stdpath(23)'))
+    eq(
+      'Vim(call):E731: Using a Dictionary as a String',
+      pcall_err(command, 'call stdpath({"eris": 23})')
+    )
+    eq('Vim(call):E730: Using a List as a String', pcall_err(command, 'call stdpath([23])'))
   end)
 
   it('$NVIM_APPNAME', function()
@@ -928,7 +934,7 @@ describe('stdpath()', function()
     clear({ env = { NVIM_APPNAME = appname, NVIM_LOG_FILE = testlog } })
     eq(appname, fn.fnamemodify(fn.stdpath('config'), ':t'))
     eq(appname, fn.fnamemodify(fn.stdpath('cache'), ':t'))
-    eq(maybe_data(appname), fn.fnamemodify(fn.stdpath('log'), ':t'))
+    eq(maybe_data(appname), fn.fnamemodify(fn.stdpath('log'), ':h:t'))
     eq(maybe_data(appname), fn.fnamemodify(fn.stdpath('data'), ':t'))
     eq(maybe_data(appname), fn.fnamemodify(fn.stdpath('state'), ':t'))
     -- config_dirs and data_dirs are empty on windows, so don't check them on

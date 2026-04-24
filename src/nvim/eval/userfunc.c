@@ -1467,7 +1467,7 @@ void set_current_funccal(funccall_T *fc)
   current_funccal = fc;
 }
 
-#if defined(EXITFREE)
+#ifdef EXITFREE
 void free_all_functions(void)
 {
   hashitem_T *hi;
@@ -1748,7 +1748,7 @@ int call_func(const char *funcname, int len, typval_T *rettv, int argcount_in, t
       if (len > 0) {
         error = FCERR_NONE;
         argv_add_base(funcexe->fe_basetv, &argvars, &argcount, argv, &argv_base);
-        nlua_typval_call(funcname, (size_t)len, argvars, argcount, rettv);
+        nlua_call_typval(funcname, (size_t)len, argvars, argcount, rettv);
       } else {
         // v:lua was called directly; show its name in the emsg
         XFREE_CLEAR(name);
@@ -1834,7 +1834,7 @@ int call_simple_luafunc(const char *funcname, size_t len, typval_T *rettv)
 
   typval_T argvars[1];
   argvars[0].v_type = VAR_UNKNOWN;
-  nlua_typval_call(funcname, len, argvars, 0, rettv);
+  nlua_call_typval(funcname, len, argvars, 0, rettv);
   return OK;
 }
 
@@ -2744,21 +2744,27 @@ void ex_function(exarg_T *eap)
     }
     if (arg != NULL && (fudi.fd_di == NULL || !tv_is_func(fudi.fd_di->di_tv))) {
       char *name_base = arg;
-      if ((uint8_t)(*arg) == K_SPECIAL) {
-        name_base = vim_strchr(arg, '_');
-        if (name_base == NULL) {
-          name_base = arg + 3;
-        } else {
-          name_base++;
+      // When defining a dictionary function with bracket notation
+      // (e.g. obj['foo-bar']()), the key is a dictionary key and is not
+      // required to follow function naming rules.  Skip the identifier
+      // check in that case.
+      if (arg != fudi.fd_newkey) {
+        if ((uint8_t)(*arg) == K_SPECIAL) {
+          name_base = vim_strchr(arg, '_');
+          if (name_base == NULL) {
+            name_base = arg + 3;
+          } else {
+            name_base++;
+          }
         }
-      }
-      int i;
-      for (i = 0; name_base[i] != NUL && (i == 0
-                                          ? eval_isnamec1(name_base[i])
-                                          : eval_isnamec(name_base[i])); i++) {}
-      if (name_base[i] != NUL) {
-        emsg_funcname(e_invarg2, arg);
-        goto ret_free;
+        int i;
+        for (i = 0; name_base[i] != NUL && (i == 0
+                                            ? eval_isnamec1(name_base[i])
+                                            : eval_isnamec(name_base[i])); i++) {}
+        if (name_base[i] != NUL) {
+          emsg_funcname(e_invarg2, arg);
+          goto ret_free;
+        }
       }
     }
     // Disallow using the g: dict.
@@ -3521,7 +3527,7 @@ static void handle_defer_one(funccall_T *funccal)
   ga_clear(&funccal->fc_defer);
 }
 
-/// Called when exiting: call all defer functions.
+/// When exiting: call all ":defer" functions.
 void invoke_all_defer(void)
 {
   for (funccall_T *fc = current_funccal; fc != NULL; fc = fc->fc_caller) {

@@ -1466,6 +1466,10 @@ static void win_update(win_T *wp)
   }
   buf->b_signcols.last_max = buf->b_signcols.max;
 
+  // Validate w_virtcol here as it can change the redraw type.
+  validate_virtcol(wp);
+  type = wp->w_redr_type;
+
   init_search_hl(wp, &screen_search_hl);
 
   // Make sure skipcol is valid, it depends on various options and the window
@@ -1850,15 +1854,8 @@ static void win_update(win_T *wp)
       // First compute the actual start and end column.
       if (VIsual_mode == Ctrl_V) {
         colnr_T fromc, toc;
-        unsigned save_ve_flags = curwin->w_ve_flags;
-
-        if (curwin->w_p_lbr) {
-          curwin->w_ve_flags = kOptVeFlagAll;
-        }
-
-        getvcols(wp, &VIsual, &curwin->w_cursor, &fromc, &toc);
+        getvcols(wp, &VIsual, &curwin->w_cursor, &fromc, &toc, GETVCOL_END_EXCL_LBR);
         toc++;
-        curwin->w_ve_flags = save_ve_flags;
         // Highlight to the end of the line, unless 'virtualedit' has
         // "block".
         if (curwin->w_curswant == MAXCOL) {
@@ -1875,7 +1872,7 @@ static void win_update(win_T *wp)
               colnr_T t;
 
               pos.col = ml_get_buf_len(wp->w_buffer, pos.lnum);
-              getvvcol(wp, &pos, NULL, NULL, &t);
+              getvvcol(wp, &pos, NULL, NULL, &t, 0);
               toc = MAX(toc, t);
             }
             toc++;
@@ -2324,6 +2321,8 @@ redr_statuscol:
 
   wp->w_lines_valid = MAX(wp->w_lines_valid, idx);
 
+  wp->w_display_tick = display_tick;
+
   // Let the syntax stuff know we stop parsing here.
   if (syntax_last_parsed != 0 && syntax_present(wp)) {
     syntax_end_parsing(wp, syntax_last_parsed + 1);
@@ -2446,7 +2445,7 @@ redr_statuscol:
       // New redraw either due to updated topline or reset skipcol.
       if (must_redraw != 0) {
         // Don't update for changes in buffer again.
-        int mod_set = curbuf->b_mod_set;
+        const bool mod_set = curbuf->b_mod_set;
         curbuf->b_mod_set = false;
         curs_columns(curwin, true);
         win_update(curwin);

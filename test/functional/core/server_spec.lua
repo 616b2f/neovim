@@ -287,7 +287,7 @@ describe('startup --listen', function()
     local cmd = vim.list_extend({ '--clean', '+qall!', '--headless' }, args)
     local r = run(cmd)
     eq(1, r.status)
-    matches(expected, r:output():gsub('\\n', ' '))
+    matches(expected, (r:output():gsub('\\n', ' ')))
 
     if is_os('win') then
       return -- On Windows, output without --headless is garbage.
@@ -296,7 +296,7 @@ describe('startup --listen', function()
     assert(not vim.tbl_contains(cmd, '--headless'))
     r = run(cmd)
     eq(1, r.status)
-    matches(expected, r:output():gsub('\\n', ' '))
+    matches(expected, (r:output():gsub('\\n', ' ')))
   end
 
   it('validates', function()
@@ -350,4 +350,32 @@ describe('startup --listen', function()
     clear({ args = { '--listen', 'test-name' } })
     matches([[[/\\]test%-name[^/\\]*]], api.nvim_get_vvar('servername'))
   end)
+end)
+
+it(':restart works in headless server (no UI)', function()
+  t.skip(is_os('win'), 'FIXME: --listen not preserved by :restart on Windows')
+
+  local nvim0 = clear()
+  local server_pipe = n.new_pipename()
+
+  finally(function()
+    n.expect_exit(n.command, 'qall!')
+    nvim0:close()
+    n.set_session(nil)
+  end)
+
+  fn.jobstart({ n.nvim_prog, '--clean', '--headless', '--listen', server_pipe })
+  t.retry(nil, nil, function()
+    neq(nil, vim.uv.fs_stat(server_pipe))
+  end)
+  n.set_session(n.connect(server_pipe))
+
+  n.expect_exit(n.command, 'restart')
+  n.set_session(n.connect(server_pipe))
+  eq(1, api.nvim_get_vvar('vim_did_enter'))
+
+  -- TODO: [command] is currently not executed without UI
+  -- n.expect_exit(n.command, 'restart lua _G.new_server = 1')
+  -- n.set_session(n.connect(server_pipe))
+  -- eq(1, n.exec_lua('return _G.new_server'))
 end)
