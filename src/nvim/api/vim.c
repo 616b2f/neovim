@@ -1200,8 +1200,8 @@ Integer nvim_open_term(Buffer buf, Dict(open_term) *opts, Error *err)
   StringBuilder contents = KV_INITIAL_VALUE;
   if (may_read_buffer) {
     pos_T start_pos = { 1, 0, 0 };
-    pos_T end_pos = { buf->b_ml.ml_line_count,  ml_get_len(buf->b_ml.ml_line_count) - 1, 0 };
-    read_buffer_into(buf, &start_pos, &end_pos, &contents);
+    pos_T end_pos = { b->b_ml.ml_line_count,  ml_get_len(b->b_ml.ml_line_count) - 1, 0 };
+    read_buffer_into(b, &start_pos, &end_pos, &contents);
   }
 
   channel_incref(chan);
