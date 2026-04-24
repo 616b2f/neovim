@@ -4415,11 +4415,12 @@ describe('API', function()
       }, api.nvim_parse_cmd('echo foo', {}))
     end)
     it('works with ranges', function()
+      local maxcol = api.nvim_get_vvar('maxcol')
       eq({
         cmd = 'substitute',
         args = { '/math.random/math.max/' },
         bang = false,
-        range = { 4, 6, 0, 2 },
+        range = { 4, 6, 0, maxcol },
         addr = 'line',
         magic = {
           file = false,
@@ -4733,11 +4734,12 @@ describe('API', function()
       }, api.nvim_parse_cmd('put', {}))
     end)
     it('works with range, count and register', function()
+      local maxcol = api.nvim_get_vvar('maxcol')
       eq({
         cmd = 'delete',
         args = {},
         bang = false,
-        range = { 3, 7, 0, 2 },
+        range = { 3, 7, 0, maxcol },
         count = 7,
         reg = '*',
         addr = 'line',
@@ -4903,11 +4905,12 @@ describe('API', function()
     end)
     it('works with user commands', function()
       command('command -bang -nargs=+ -range -addr=lines MyCommand echo foo')
+      local maxcol = api.nvim_get_vvar('maxcol')
       eq({
         cmd = 'MyCommand',
         args = { 'test', 'it' },
         bang = true,
-        range = { 4, 6, 0, 2 },
+        range = { 4, 6, 0, maxcol },
         addr = 'line',
         magic = {
           file = false,
@@ -5233,7 +5236,7 @@ describe('API', function()
       feed('VG:')
       n.poke_eventloop()
       res = api.nvim_parse_cmd("'<,'>", {})
-      eq({ 1, 5 }, res.range)
+      eq({ 1, 5, 0, 0 }, res.range)
     end)
     it('parses modifier-only cmdline (:aboveleft)', function()
       local res = api.nvim_parse_cmd('aboveleft', {})
@@ -5279,12 +5282,8 @@ describe('API', function()
         pcall_err(api.nvim_cmd, { cmd = 'print', args = {}, range = true }, {})
       )
       eq(
-        "Invalid 'range': expected <=2 or 4 elements",
+        "Invalid 'range': expected <=4 elements",
         pcall_err(api.nvim_cmd, { cmd = 'print', args = {}, range = { 1, 2, 3, 4, 5 } }, {})
-      )
-      eq(
-        "Invalid 'range': expected <=2 or 4 elements",
-        pcall_err(api.nvim_cmd, { cmd = 'print', args = {}, range = { 1, 2, 3 } }, {})
       )
       eq(
         'Invalid range element: expected non-negative Integer',

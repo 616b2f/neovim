@@ -3090,30 +3090,35 @@ int parse_cmd_address(exarg_T *eap, const char **errormsg, bool silent)
           eap->addr_count++;
         }
       }
+      address_count++;
     } else {
       eap->line2 = lnum;
       eap->addr_mode = addr_mode;
+      eap->addr_count++;
 
       if (eap->addr_type == ADDR_POSITIONS) {
-        if (eap->addr_count == 0) {
+        if (eap->addr_count == 1) {
           eap->line1 = lnum;
           eap->line2 = lnum;
-          eap->col1 = 0;
-          eap->col2 = ml_get_len(lnum);
-          if (eap->col2 > 0) {
-            eap->col2--;
+          if (cnum != MAXCOL && eap->cmdidx != CMD_SIZE) {
+            eap->col1 = cnum;
+            eap->col2 = cnum;
           }
         }
-        if (cnum != MAXCOL && eap->addr_count == 0) {
-          eap->col1 = cnum;
-          eap->col2 = cnum;
-        }
-        if (cnum != MAXCOL && eap->addr_count == 1) {
+        if (cnum != MAXCOL && eap->addr_count == 2) {
           eap->col2 = cnum;
         }
       }
     }
-    eap->addr_count++;
+
+    if (eap->addr_type == ADDR_POSITIONS
+        && eap->addr_count == 2
+        && cnum == MAXCOL
+        && eap->cmdidx != CMD_SIZE) {
+      eap->col1 = 0;
+      eap->col2 = MAXCOL;
+      eap->addr_count = 4;
+    }
 
     if (*eap->cmd == ';') {
       if (!eap->skip) {
@@ -3845,15 +3850,6 @@ mpos_T get_address(exarg_T *eap, char **ptr, cmd_addr_T addr_type, bool skip, bo
     default:
       if (ascii_isdigit(*cmd)) {                // absolute line number
         lnum = (linenr_T)getdigits(&cmd, false, 0);
-        addr.mode = kOmLineWise;
-        if (address_count != 2) {
-          cnum = 0;
-        } else {
-          cnum = ml_get_len(lnum);
-          if (cnum > 0) {
-            cnum--;
-          }
-        }
       }
     }
 
@@ -4027,10 +4023,7 @@ char *invalid_range(exarg_T *eap)
     switch (eap->addr_type) {
     case ADDR_POSITIONS:
       if (eap->line2 > (curbuf->b_ml.ml_line_count + (eap->cmdidx == CMD_diffget
-                                                      || eap->cmdidx == CMD_diffput))
-          || eap->col2 > (ml_get_buf_len(curbuf,
-                                         (eap->line2 - (eap->cmdidx == CMD_diffget
-                                                        || eap->cmdidx == CMD_diffput))) + 1)) {
+                                                      || eap->cmdidx == CMD_diffput))) {
         return _(e_invrange);
       }
       break;

@@ -194,7 +194,8 @@ Dict(cmd) nvim_parse_cmd(String str, Dict(empty) *opts, Arena *arena, Error *err
     }
     ADD_C(range, INTEGER_OBJ(ea.line2));
 
-    if (ea.addr_type == ADDR_POSITIONS) {
+    if (ea.addr_type == ADDR_POSITIONS
+        && ea.addr_count >= 2) {
       ADD_C(range, INTEGER_OBJ(ea.col1));
       ADD_C(range, INTEGER_OBJ(ea.col2));
     }
@@ -567,7 +568,7 @@ String nvim_cmd(uint64_t channel_id, Dict(cmd) *cmd, Dict(cmd_opts) *opts, Arena
 
   if (HAS_KEY(cmd, cmd, range)) {
     VALIDATE_MOD((ea.argt & EX_RANGE), "range", cmd->cmd.data);
-    VALIDATE_EXP((cmd->range.size <= 2 || cmd->range.size == 4), "range", "<=2 or 4 elements", NULL,
+    VALIDATE_EXP((cmd->range.size <= 4), "range", "<=4 elements", NULL,
     {
       goto end;
     });
