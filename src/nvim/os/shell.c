@@ -1253,7 +1253,18 @@ static size_t write_output(char *output, size_t remaining, bool eof)
   char *start = output;
   size_t off = 0;
   while (off < remaining) {
-    if (output[off] == NL) {
+    // CRLF
+    // there is special case for binary mode
+    // we don't remove CR in that case
+    if (output[off] == CAR && output[off + 1] == NL && !curbuf->b_p_bin) {
+      output[off] = NUL;
+      ml_append(curwin->w_cursor.lnum++, output, (int)off + 1, false);
+      size_t skip = off + 2;
+      output += skip;
+      remaining -= skip;
+      off = 0;
+      continue;
+    } else if ((output[off] == CAR && !curbuf->b_p_bin) || output[off] == NL) {
       // Insert the line
       output[off] = NUL;
       ml_append(curwin->w_cursor.lnum++, output, (int)off + 1, false);

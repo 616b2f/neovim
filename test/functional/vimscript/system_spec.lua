@@ -573,7 +573,7 @@ describe('shell :!', function()
   it('write in binary mode should not remove CR #39424', function()
     local fname = 'Xbinaryfile'
     os.remove(fname)
-    eq(0, fn.writefile({'\r\n'}, fname, 'b'))
+    eq(0, fn.writefile({ '\r\n' }, fname, 'b'))
     command('edit ++bin ' .. fname)
     command('%!cat')
     command('w')
