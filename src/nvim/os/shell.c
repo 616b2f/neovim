@@ -1253,16 +1253,18 @@ static size_t write_output(char *output, size_t remaining, bool eof)
   char *start = output;
   size_t off = 0;
   while (off < remaining) {
-    // CRLF
-    if (output[off] == CAR && output[off + 1] == NL) {
+    if (output[off] == NL) {
+      // Insert the line
       output[off] = NUL;
       ml_append(curwin->w_cursor.lnum++, output, (int)off + 1, false);
-      size_t skip = off + 2;
+      size_t skip = off + 1;
       output += skip;
       remaining -= skip;
       off = 0;
       continue;
-    } else if (output[off] == CAR || output[off] == NL) {
+    }
+
+    if (output[off] == CAR || output[off] == NL) {
       // Insert the line
       output[off] = NUL;
       ml_append(curwin->w_cursor.lnum++, output, (int)off + 1, false);
