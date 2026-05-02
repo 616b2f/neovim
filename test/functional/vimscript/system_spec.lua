@@ -574,9 +574,7 @@ describe('shell :!', function()
     local fname = 'Xbinaryfile'
     os.remove(fname)
     eq(0, fn.writefile({'\r\n'}, fname, 'b'))
-    exec_lua [[
-      vim.cmd(vim.api.nvim_parse_cmd('edit ++bin Xbinaryfile', {}))
-    ]]
+    command('edit ++bin ' .. fname)
     command('%!cat')
     command('w')
     eq('\r\0', read_file(fname))
