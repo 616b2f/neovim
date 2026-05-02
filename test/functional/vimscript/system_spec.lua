@@ -6,9 +6,12 @@ local Screen = require('test.functional.ui.screen')
 
 local assert_alive = n.assert_alive
 local testprg = n.testprg
+local fn = n.fn
 local eq, call, clear, eval, feed_command, feed, api =
   t.eq, n.call, n.clear, n.eval, n.feed_command, n.feed, n.api
 local command = n.command
+local read_file = t.read_file
+local exec_lua = n.exec_lua
 local insert = n.insert
 local expect = n.expect
 local pcall_err = t.pcall_err
@@ -566,6 +569,18 @@ end)
 
 describe('shell :!', function()
   before_each(clear)
+
+  it('write in binary mode should not remove CR #39424', function()
+    local fname = 'Xbinaryfile'
+    os.remove(fname)
+    eq(0, fn.writefile({'\r\n'}, fname, 'b'))
+    exec_lua [[
+      vim.cmd(vim.api.nvim_parse_cmd('edit ++bin Xbinaryfile', {}))
+    ]]
+    command('%!cat')
+    command('w')
+    eq('\r\0', read_file(fname))
+  end)
 
   it(':{range}! works when the first char is NUL #34163', function()
     api.nvim_buf_set_lines(0, 0, -1, true, { '\0hello', 'hello' })
